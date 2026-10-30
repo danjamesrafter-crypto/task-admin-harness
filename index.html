@@ -235,8 +235,26 @@ summary{cursor:pointer;color:#A9D2FA;font-size:13px}
         note('subcategory values: ' + JSON.stringify(sc) + ' (used to tell reads from adjudication; VERIFY)');
         return Promise.all([loadProjects(), loadUsers()]).then(loadPermissions);
       })
-      .then(function () { pickDefaults(); render(); loadExports(); })
+      .then(function () { pickDefaults(); render(); loadExports(); if (!attempts[ai].extra && accepted && accepted.length && !findCulprit.done) findCulprit(); })
       .catch(function (e) { if (silent) { note('Background refresh failed; keeping the current list.'); return; } fail('Could not load tasks: ' + errMsg(e)); });
+  }
+  // r6nvg8 (10-30): every extra column passes a 1-row probe, yet the full page 500s with all of them together.
+  // Test each at full page size, keep the ones that work, and reload once with that set.
+  function findCulprit() {
+    findCulprit.done = true;
+    var ok = [];
+    return accepted.reduce(function (p, col) {
+      return p.then(function () {
+        return api('GET', '/api/tasks/reader', { limit: 100, skip: 0, sort: 'created:desc', columns: SAFE + ',' + col })
+          .then(function () { ok.push(col); note('  full page with ' + col + ': ok'); }, function () { note('  full page with ' + col + ': FAILS'); });
+      });
+    }, Promise.resolve()).then(function () {
+      if (!ok.length) return;
+      return api('GET', '/api/tasks/reader', { limit: 100, skip: 0, sort: 'created:desc', columns: SAFE + ',' + ok.join(',') }).then(function () {
+        note('Full page works with: ' + ok.join(', ') + '. Reloading with these columns.');
+        accepted = ok; load(true);
+      }, function () { note('Columns pass one at a time but fail together; staying on safe columns.'); });
+    });
   }
   function loadProjects() {
     return api('GET', '/api/projects', {}).then(function (r) {
@@ -282,7 +300,9 @@ summary{cursor:pointer;color:#A9D2FA;font-size:13px}
   // ---------------------------------------------------------------- task model
   function projOf(t) { return t.parents && t.parents.project; }
   function projLabel(id) { var p = S.projects[id]; if (p && p.label) return p.label; var t = S.tasks.filter(function (x) { return projOf(x) === id; })[0]; return (t && t.parent_details && t.parent_details.project_label) || 'Project …' + String(id).slice(-4); }
-  function isAdj(t) { return !!t.adjudication || /adjud/i.test(String(t.subcategory || '')) || /adjud/i.test(String(t.protocol_label || '')); }
+  // r6nvg8 (10-30): subcategory is 'reader' or 'adjudicator', and a protocol can itself be labelled 'adjudication'
+  // while holding reads. So subcategory decides when present; the label is only a last resort.
+  function isAdj(t) { if (t.subcategory != null && t.subcategory !== '') return /adjud/i.test(String(t.subcategory)); return !!t.adjudication || /adjud/i.test(String(t.protocol_label || '')); }
   function protoKey(t) { return String(t.protocol_id || t.protocol_label || 'Unlabelled protocol'); }
   function protoName(t) { return (t.protocol_label || 'Unlabelled protocol') + (t.protocol_version ? ' v' + t.protocol_version : ''); }
   function who(t) { var a = t.assignee; return a && a.type === 'user' ? a.id : null; }
