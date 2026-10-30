@@ -131,7 +131,7 @@ summary{cursor:pointer;color:#A9D2FA;font-size:13px}
     project: null, protocol: null, screen: 'overview', rail: false,
     sortKey: 'od', sortDir: 'desc', wfStage: 'all', caseFilter: 'all', showNames: true,
     readerSel: null, caseSel: null, reassign: null, exportDlg: null, toast: '', busy: false,
-    gear: null, gearState: 'idle', analyses: {}, jobs: {}, subcats: {}
+    reports: {}, reportState: 'idle', repTimer: null, subcats: {}
   };
   try { var rs = localStorage.getItem('taskAdmin.railCollapsed'); if (rs !== null) S.rail = rs === '1'; } catch (e) {}
 
@@ -406,75 +406,65 @@ summary{cursor:pointer;color:#A9D2FA;font-size:13px}
     }).sort(function (x, y) { return natural(x.label, y.label); });
   }
 
-  // ---------------------------------------------------------------- exports (form-and-annotations-exporter)
-  var GEAR_NAME = 'form-and-annotations-exporter';
-  function gearName() { return (S.params && S.params.exporter_gear) || GEAR_NAME; }
-  function loadExports() {
-    if (!S.project) return;
-    if (!S.gear && S.gearState === 'idle') {
-      S.gearState = 'loading';
-      // VERIFY: gear lookup by name. Falls back to listing all gears and matching gear.name.
-      api('GET', '/api/gears', { filter: 'gear.name=' + gearName() }).then(rows).catch(function () { return api('GET', '/api/gears', {}).then(rows); })
-        .then(function (gs) {
-          gs = gs.filter(function (g) { return g.gear && g.gear.name === gearName(); }).sort(function (a, b) { return natural(b.gear.version, a.gear.version); });
-          S.gear = gs[0] || null; S.gearState = S.gear ? 'ok' : 'missing';
-          note(S.gear ? 'Exporter gear ' + S.gear.gear.version + ' (' + (S.gear._id || S.gear.id) + ')' : 'Exporter gear not installed on this site.');
-          render();
-        }, function (e) { S.gearState = 'error'; note('Gear lookup failed: ' + errMsg(e)); render(); });
-    }
-    loadAnalyses(S.project);
+  // ---------------------------------------------------------------- exports (platform Task Reports Queue)
+  // Same API the core "Task Report Queue" project tab uses (core 23.x, feature tasks_refactor):
+  //   GET    /api/reports?project_id=&limit=&skip=&sort=created:desc   list
+  //   POST   /api/{report_type}/reports  {protocol_id, project_id, version, metadata_columns}   create
+  //   GET    /api/{report_type}/reports/{id}/csv                       download
+  //   DELETE /api/{report_type}/reports/{id}                           delete
+  // report_type: form_and_annotation | task_detail. status: pending | in_progress | completed | failed | canceled.
+  // Permissions: tasks_report_read / tasks_report_create / tasks_report_delete.
+  var REPORT_TYPES = [['form_and_annotation', 'Forms and annotations'], ['task_detail', 'Task details']];
+  var REPORT_COLUMNS = ['tasks.transitions.complete', 'project.label', 'protocol.type', 'protocol.label', 'protocol.version', 'subject.label', 'session.label', 'acquisition.label', 'file.name', 'task.assignee', 'task.origin.id'];
+  function typeLabel(t) { var m = REPORT_TYPES.filter(function (x) { return x[0] === t; })[0]; return m ? m[1] : t; }
+  function loadExports() { if (S.project) loadReports(S.project); }
+  function loadReports(pid, quiet) {
+    return api('GET', '/api/reports', { project_id: pid, limit: 100, skip: 0, sort: 'created:desc' }).then(function (r) {
+      S.reports[pid] = rows(r).sort(function (a, b) { return String(b.created).localeCompare(String(a.created)); });
+      S.reportState = 'ok';
+      if (!quiet) note('Task reports on this project: ' + S.reports[pid].length + '.');
+      render(); pollReports(pid);
+    }, function (e) {
+      S.reports[pid] = S.reports[pid] || [];
+      S.reportState = e && (e.status === 403) ? 'denied' : e && e.status === 404 ? 'missing' : 'error';
+      note('Task report queue unavailable (' + errMsg(e) + ').'); render();
+    });
   }
-  // Past exports = this project's analyses created by the exporter gear (VERIFY: gear_info on analyses).
-  function loadAnalyses(pid, quiet) {
-    return api('GET', '/api/projects/' + pid + '/analyses', {}).then(function (r) {
-      S.analyses[pid] = rows(r).filter(function (a) { return a.gear_info && a.gear_info.name === gearName(); })
-        .sort(function (a, b) { return String(b.created).localeCompare(String(a.created)); });
-      if (!quiet) note('Exports on this project: ' + S.analyses[pid].length + '.');
-      render();
-    }, function () { S.analyses[pid] = S.analyses[pid] || []; render(); });
+  function repState(r) { return r.status || 'pending'; }
+  function active(r) { var s = repState(r); return s === 'pending' || s === 'in_progress'; }
+  function pollReports(pid) {
+    clearTimeout(S.repTimer);
+    if (!(S.reports[pid] || []).some(active)) return;
+    S.repTimer = setTimeout(function () {
+      var before = {}; (S.reports[pid] || []).forEach(function (r) { before[r._id || r.id] = repState(r); });
+      loadReports(pid, true).then(function () {
+        (S.reports[pid] || []).forEach(function (r) { var id = r._id || r.id, b = before[id], n = repState(r); if (b && b !== n && (n === 'completed' || n === 'failed')) flash(n === 'completed' ? typeLabel(r.report_type) + ' report ready to download' : typeLabel(r.report_type) + ' report failed'); });
+      });
+    }, S.demo ? 1500 : 5000);
   }
-  function exportProtocol(a) { var m = /^Task Admin export · (.+) · \d{4}-\d{2}-\d{2}/.exec(a.label || ''); return m ? m[1] : null; }
-  function jobState(a) { var j = a.job; if (!j) return a.files && a.files.length ? 'complete' : 'unknown'; return typeof j === 'string' ? (S.jobs[j] && S.jobs[j].state) || 'unknown' : j.state || 'unknown'; }
   function runExport(d) {
-    var g = S.gear, gid = g && (g._id || g.id);
-    if (!gid) { flash('The exporter gear isn’t installed on this site.'); return; }
-    var config = { debug: false, protocol_name: d.protocol, 'annotations-scope': d.ann, 'form-responses-scope': d.forms, read_timeout: 60 };
-    var dest = d.level === 'session' ? d.dest : S.project;
-    var label = 'Task Admin export · ' + d.protocol + ' · ' + new Date().toISOString().slice(0, 16).replace('T', ' ');
+    if (!d.protocolId) { flash('This protocol has no ID on its tasks, so a report can’t be requested.'); return; }
+    var body = { protocol_id: d.protocolId, project_id: S.project, version: d.version, metadata_columns: d.columns };
     S.exportDlg = null; S.busy = true; render();
-    // VERIFY: analysis + job in one call (what the SDK's gear.run does for analysis gears); fallback: jobs/add.
-    api('POST', '/api/containers/' + dest + '/analyses', { job: true }, { label: label, job: { gear_id: gid, config: config, inputs: {} } })
-      .catch(function () { return api('POST', '/api/jobs/add', undefined, { gear_id: gid, config: config, inputs: {}, destination: { type: d.level === 'session' ? 'session' : 'project', id: dest }, tags: ['task-admin-export'] }); })
-      .then(function (r) {
-        S.busy = false; flash('Export started. You can keep working; it shows below when the files are ready.');
-        var jid = r && (r.job || r.job_id || (r._id && !r.label ? r._id : null));
-        if (jid) watchJob(String(jid));
-        return loadAnalyses(S.project, true);
-      }, function (e) { S.busy = false; flash('Couldn’t start the export (' + errMsg(e) + '). See Diagnostics.'); });
+    var types = d.types.slice();
+    types.reduce(function (p, t) { return p.then(function () { return api('POST', '/api/' + t + '/reports', undefined, body); }); }, Promise.resolve())
+      .then(function () { S.busy = false; flash(plural(types.length, 'report') + ' queued. You can keep working; they show below when ready.'); return loadReports(S.project, true); },
+        function (e) { S.busy = false; flash('Couldn’t queue the report (' + errMsg(e) + '). See Diagnostics.'); loadReports(S.project, true); });
   }
-  function watchJob(id) {
-    S.jobs[id] = S.jobs[id] || { state: 'pending' };
-    var tick = function () {
-      api('GET', '/api/jobs/' + id).then(function (j) {
-        var prev = S.jobs[id].state; S.jobs[id] = { state: j.state, dest: j.destination, j: j };
-        if (prev !== j.state && (j.state === 'complete' || j.state === 'failed')) { flash(j.state === 'complete' ? 'Export ready' : 'Export failed. See the job log in Flywheel.'); loadAnalyses(S.project, true); }
-        render();
-        if (j.state === 'pending' || j.state === 'running') setTimeout(tick, S.demo ? 1500 : 5000);
-      }, function () { setTimeout(tick, 10000); });
-    };
-    tick();
-  }
-  function download(a, f) {
-    // VERIFY: file download through the extension proxy. Inside Flywheel's frame the browser may block it;
-    // the fallback is the analysis on the project's Analyses tab.
-    api('GET', '/api/analyses/' + (a._id || a.id) + '/files/' + encodeURIComponent(f.name)).then(function (body) {
+  function download(r) {
+    var type = r.report_type, id = r._id || r.id;
+    api('GET', '/api/' + type + '/reports/' + id + '/csv') /* VERIFY: core sends Accept: text/csv; the SDK proxy can't set headers */.then(function (body) {
       var text = typeof body === 'string' ? body : JSON.stringify(body);
+      var name = (protoLabelById(r.protocol_id) || 'protocol') + '_' + type + '_' + projLabel(S.project) + '_' + String(r.created || '').replace(/\.\d+Z$/, 'Z') + '.csv';
       var url = URL.createObjectURL(new Blob([text], { type: 'text/csv' })), el = document.createElement('a');
-      el.href = url; el.download = f.name; document.body.appendChild(el); el.click(); el.remove(); setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
-      flash('Downloading ' + f.name);
-    }, function () { flash('Download blocked here. Open the project’s Analyses tab in Flywheel to get the file.'); });
+      el.href = url; el.download = name.replace(/[\\/:*?"<>|\s]+/g, '_'); el.style.display = 'none'; document.body.appendChild(el); el.click(); setTimeout(function () { el.remove(); }, 1000); setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+      flash('Downloading ' + typeLabel(type) + ' report');
+    }, function () { flash('Download blocked here. Open the project’s Task Report Queue tab in Flywheel to get the file.'); });
   }
-
+  function deleteReport(r) {
+    api('DELETE', '/api/' + r.report_type + '/reports/' + (r._id || r.id)).then(function () { flash('Report deleted'); loadReports(S.project, true); }, function (e) { flash('Couldn’t delete (' + errMsg(e) + ')'); });
+  }
+  function protoLabelById(id) { var t = S.tasks.filter(function (x) { return x.protocol_id === id; })[0]; return t ? t.protocol_label + (t.protocol_version ? ' v' + t.protocol_version : '') : null; }
   // ---------------------------------------------------------------- reassign (PUT /api/tasks/reader/{id}/assign, proven for claim)
   function reassign(tasks, to) {
     S.busy = true; render();
@@ -557,7 +547,7 @@ summary{cursor:pointer;color:#A9D2FA;font-size:13px}
   }
   function header(sc, hasWf, cs) {
     var p = sc.first, nn = cs.filter(function (c) { return c.stg === 'compare'; }).length;
-    var exportsN = (S.analyses[S.project] || []).filter(function (a) { var s = jobState(a); return s === 'pending' || s === 'running'; }).length;
+    var exportsN = (S.reports[S.project] || []).filter(active).length;
     var tabs = [['overview', 'Overview'], hasWf ? ['workflow', 'Workflow', nn] : null, ['readers', 'Readers'], ['cases', 'Cases'], ['exports', 'Exports', exportsN]].filter(Boolean);
     return '<div class="top"><div class="t"><div class="crumb">' + esc(projLabel(S.project)) + ' · reading project</div><div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:10px"><h1>' + esc(p ? p.protocol_label || 'Unlabelled protocol' : '') + '</h1>' + (p && p.protocol_version ? '<span class="chip">v' + esc(p.protocol_version) + '</span>' : '') + '</div></div>' +
       '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">' + (S.demo ? '<span class="chip demo">Demo data</span>' : '<span class="chip live"><i></i>Live · ' + esc(S.origin.replace('https://', '')) + (S.updated ? ' · ' + S.updated.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '') + '</span>') +
@@ -699,24 +689,26 @@ summary{cursor:pointer;color:#A9D2FA;font-size:13px}
   }
 
   function exportsView(sc) {
-    var proto = sc.first ? sc.first.protocol_label : '', ex = S.analyses[S.project], g = S.gear;
+    var f = sc.first || {}, proto = f.protocol_label || '', pidP = f.protocol_id, all = S.reports[S.project];
     var h = '';
-    if (S.gearState === 'missing') h += '<div class="banner">The <span class="mono">' + esc(gearName()) + '</span> gear isn’t installed on this site, so exports can’t run. A site admin installs it from the Gear Exchange.</div>';
-    else if (g && natural(g.gear.version, '0.2.4') < 0) h += '<div class="banner">Exporter v' + esc(g.gear.version) + ' is installed. v0.2.4 and later also export form responses saved on non-file containers; consider upgrading.</div>';
-    var mineEx = (ex || []).filter(function (a) { var p = exportProtocol(a); return !p || p === proto; });
-    var last = mineEx.filter(function (a) { return jobState(a) === 'complete'; })[0];
+    if (S.reportState === 'denied') h += '<div class="banner">This account can’t read the task report queue on this project (needs <span class="mono">tasks_report_read</span>).</div>';
+    else if (S.reportState === 'missing') h += '<div class="banner">The task report queue isn’t available on this site (core feature <span class="mono">tasks_refactor</span>).</div>';
+    var mine = (all || []).filter(function (r) { return !pidP || r.protocol_id === pidP; });
+    var last = mine.filter(function (r) { return repState(r) === 'completed'; })[0];
     var since = last ? sc.tasks.filter(function (t) { var d = doneAt(t); return d && Date.parse(d) > Date.parse(last.created); }).length : null;
-    h += '<section class="panel" style="background:#0F1E33;border-color:var(--line2)"><div class="lab">' + esc(proto) + '</div>' + (last ? '<div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px"><div style="flex:1;min-width:220px"><div class="num" style="font-size:30px;font-weight:500;color:' + (since ? 'var(--warn)' : 'var(--ok)') + '">' + since + '</div><div>' + (since ? plural(since, 'task') + ' completed since' : 'Up to date with') + ' the last export (' + fmtT(last.created) + ')</div><div class="muted num" style="font-size:12px">' + sc.tasks.filter(function (t) { return t.status === 'completed'; }).length + ' completed tasks in this protocol now</div></div><button class="btn primary" data-export="project"' + (g ? '' : ' disabled') + '>Export now</button></div>' : '<div style="display:flex;align-items:center;gap:12px"><span style="flex:1">No export of this protocol on this project yet.</span><button class="btn primary" data-export="project"' + (g ? '' : ' disabled') + '>Export now</button></div>') + '</section>';
-    if (ex == null) return h + '<div class="empty">Loading exports…</div>';
-    h += '<section class="panel"><div class="ph"><h2>Exports on this project</h2><span class="muted" style="font-size:12px">Analyses made by the exporter gear, newest first</span></div>' + (ex.length ? ex.map(function (a) {
-      var s = jobState(a), idx = { pending: 0, running: 1, complete: 2, failed: 1, cancelled: -1 }[s];
-      var steps = ['Queued', 'Running', 'Files ready'].map(function (l, i) { var c = s === 'failed' && i === 1 ? 'var(--c-od)' : (idx != null && (i < idx || (i === idx && s === 'complete'))) ? 'var(--c-done)' : i === idx ? 'var(--accent)' : 'var(--line)'; return '<div><i style="background:' + c + '"></i><span class="muted">' + l + '</span></div>'; }).join('');
-      var aSince = s === 'complete' ? sc.tasks.filter(function (t) { var d = doneAt(t); return d && Date.parse(d) > Date.parse(a.created); }).length : null;
-      return '<div style="border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:10px;background:var(--panel2)"><div style="display:flex;gap:10px;align-items:flex-start"><div style="flex:1;min-width:0"><b style="font-weight:600">' + esc(a.label) + '</b><div class="muted" style="font-size:12px">' + fmtT(a.created) + (a.gear_info ? ' · v' + esc(a.gear_info.version) : '') + '</div></div>' + badge(s === 'complete' ? 'completed' : s === 'failed' ? 'overdue' : s === 'running' ? 'in_progress' : 'todo', { complete: 'Ready', failed: 'Failed', running: 'Running', pending: 'Queued', cancelled: 'Cancelled' }[s] || s) + '</div>' +
+    var can = S.reportState === 'ok' && !!pidP;
+    h += '<section class="panel" style="background:#0F1E33;border-color:var(--line2)"><div class="lab">' + esc(proto) + (f.protocol_version ? ' · v' + esc(f.protocol_version) : '') + '</div>' + (last ? '<div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px"><div style="flex:1;min-width:220px"><div class="num" style="font-size:30px;font-weight:500;color:' + (since ? 'var(--warn)' : 'var(--ok)') + '">' + since + '</div><div>' + (since ? plural(since, 'task') + ' completed since' : 'Up to date with') + ' the last report (' + fmtT(last.created) + ')</div><div class="muted num" style="font-size:12px">' + sc.tasks.filter(function (t) { return t.status === 'completed'; }).length + ' completed tasks in this protocol now</div></div><button class="btn primary" data-export="project"' + (can ? '' : ' disabled') + '>New report</button></div>' : '<div style="display:flex;align-items:center;gap:12px"><span style="flex:1">No report for this protocol on this project yet.</span><button class="btn primary" data-export="project"' + (can ? '' : ' disabled') + '>New report</button></div>') + '</section>';
+    if (all == null) return h + '<div class="empty">Loading reports…</div>';
+    h += '<section class="panel"><div class="ph"><h2>Task report queue</h2><span class="muted" style="font-size:12px">This protocol’s reports, newest first · same queue as the project’s Task Report Queue tab</span></div>' + (mine.length ? mine.map(function (r) {
+      var s = repState(r), idx = { pending: 0, in_progress: 1, completed: 2, failed: 1, canceled: -1 }[s], id = r._id || r.id;
+      var steps = ['Queued', 'Building', 'Ready'].map(function (l, i) { var c = s === 'failed' && i === 1 ? 'var(--c-od)' : (idx != null && (i < idx || (i === idx && s === 'completed'))) ? 'var(--c-done)' : i === idx ? 'var(--accent)' : 'var(--line)'; return '<div><i style="background:' + c + '"></i><span class="muted">' + l + '</span></div>'; }).join('');
+      var rSince = s === 'completed' ? sc.tasks.filter(function (t) { var d = doneAt(t); return d && Date.parse(d) > Date.parse(r.created); }).length : null;
+      var by = r.origin && r.origin.id ? userName(r.origin.id) : r.user ? userName(r.user) : '';
+      return '<div style="border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:10px;background:var(--panel2)"><div style="display:flex;gap:10px;align-items:flex-start"><div style="flex:1;min-width:0"><b style="font-weight:600">' + esc(typeLabel(r.report_type)) + ' · ' + esc(protoLabelById(r.protocol_id) || proto) + '</b><div class="muted" style="font-size:12px">' + fmtT(r.created) + (by ? ' · ' + esc(by) : '') + (r.size ? ' · ' + Math.max(1, Math.round(r.size / 1024)) + ' KB' : '') + '</div></div>' + badge(s === 'completed' ? 'completed' : s === 'failed' ? 'overdue' : s === 'in_progress' ? 'in_progress' : 'todo', { completed: 'Ready', failed: 'Failed', in_progress: 'Building', pending: 'Queued', canceled: 'Canceled' }[s] || s) + '</div>' +
         (idx != null && idx >= 0 ? '<div class="steps">' + steps + '</div>' : '') +
-        (aSince != null ? '<div style="font-size:12px;color:' + (aSince ? 'var(--warn)' : 'var(--ok)') + '">' + (aSince ? plural(aSince, 'task') + ' completed since this export' : 'Up to date: no tasks completed since this export') + '</div>' : '') +
-        ((a.files || []).filter(function (f) { return /\.csv$/i.test(f.name); }).map(function (f) { return '<div class="file">' + IC.doc + '<div style="flex:1;min-width:0"><div class="mono" style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(f.name) + '</div><div class="muted num" style="font-size:11px">' + (f.size ? Math.max(1, Math.round(f.size / 1024)) + ' KB' : '') + '</div></div><button class="btn sm primary" data-dl="' + esc((a._id || a.id) + '|' + f.name) + '">Download</button></div>'; }).join('')) + '</div>';
-    }).join('') : '<div class="empty">No exports yet.</div>') + '</section>';
+        (rSince != null ? '<div style="font-size:12px;color:' + (rSince ? 'var(--warn)' : 'var(--ok)') + '">' + (rSince ? plural(rSince, 'task') + ' completed since this report' : 'Up to date: no tasks completed since this report') + '</div>' : '') +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap">' + (s === 'completed' ? '<button class="btn sm primary" data-dl="' + esc(id) + '">Download CSV</button>' : '') + (!active(r) ? '<button class="btn sm" data-del-rep="' + esc(id) + '"' + (S.delPending === id ? ' style="color:var(--bad);border-color:var(--bad)">Confirm delete' : '>Delete') + '</button>' : '') + '</div></div>';
+    }).join('') : '<div class="empty">No reports yet.</div>') + '</section>';
     return h;
   }
 
@@ -761,20 +753,15 @@ summary{cursor:pointer;color:#A9D2FA;font-size:13px}
       '<div style="display:flex;justify-content:flex-end;gap:8px"><button class="btn" data-cancel="1">Cancel</button><button class="btn primary" data-confirm-reassign="1"' + (r.to && !S.busy ? '' : ' disabled') + '>Move ' + plural(ts.length, 'read') + '</button></div></div></div>';
   }
   function exportDlg(sc) {
-    var d = S.exportDlg, g = S.gear;
-    var lv = [['project', 'Project · ' + projLabel(S.project), 'Every task in this protocol']];
-    if (d.dest && d.level === 'session') lv.push(['session', 'Session · ' + d.destLabel, 'Only this case’s tasks']);
-    var cfg = { debug: false, protocol_name: d.protocol, 'annotations-scope': d.ann, 'form-responses-scope': d.forms, read_timeout: 60 };
-    var bad = d.ann === 'none' && d.forms === 'none';
-    return '<div class="modal"><div class="dlg" role="dialog" aria-modal="true" aria-label="Export"><div style="display:flex;gap:10px;align-items:flex-start"><div style="flex:1"><h1 style="font-size:22px">Export form responses and annotations</h1><p class="muted" style="margin:6px 0 0;font-size:13px">Runs <span class="mono">' + esc(gearName()) + '</span>' + (g ? ' v' + esc(g.gear.version) : '') + ' and saves two CSV files to an analysis.</p></div><button class="ib" data-cancel="1" aria-label="Close">' + IC.close + '</button></div>' +
-      '<div class="lab">Run at</div><div class="opt">' + lv.map(function (l) { return '<button class="ob" data-lv="' + l[0] + '" aria-pressed="' + (d.level === l[0]) + '">' + esc(l[1]) + '</button>'; }).join('') + '</div>' +
-      '<div class="lab">Protocol <span class="mono" style="text-transform:none;letter-spacing:0">protocol_name</span></div><div class="mono" style="padding:8px 12px;border:1px solid var(--line2);border-radius:10px;background:var(--panel2)">' + esc(d.protocol) + '</div>' +
-      '<div class="lab">Form responses <span class="mono" style="text-transform:none;letter-spacing:0">form-responses-scope</span></div><div class="opt">' + [['task', 'Task responses'], ['none', 'None']].map(function (o) { return '<button class="ob" data-fr="' + o[0] + '" aria-pressed="' + (d.forms === o[0]) + '">' + o[1] + '</button>'; }).join('') + '</div>' +
-      '<div class="lab">Annotations <span class="mono" style="text-transform:none;letter-spacing:0">annotations-scope</span></div><div class="opt">' + [['task', 'Task'], ['both', 'Task and non-task'], ['non-task', 'Non-task only'], ['none', 'None']].map(function (o) { return '<button class="ob" data-an="' + o[0] + '" aria-pressed="' + (d.ann === o[0]) + '">' + o[1] + '</button>'; }).join('') + '</div>' +
-      '<details><summary>Gear config</summary><pre>' + esc(JSON.stringify(cfg, null, 2)) + '</pre></details>' +
-      (!S.showNames ? '<p style="margin:0;font-size:12px;color:var(--warn)">Reader names are coded here, but the gear writes assignee emails as stored.</p>' : '') +
-      (bad ? '<p style="margin:0;font-size:12px;color:var(--bad)">Pick at least one output; with both set to none the gear fails.</p>' : '') +
-      '<div style="display:flex;justify-content:flex-end;gap:8px"><button class="btn" data-cancel="1">Cancel</button><button class="btn primary" data-run-export="1"' + (bad || !g || S.busy ? ' disabled' : '') + '>Run export</button></div></div></div>';
+    var d = S.exportDlg, bad = !d.types.length || !d.protocolId;
+    return '<div class="modal"><div class="dlg" role="dialog" aria-modal="true" aria-label="New task report"><div style="display:flex;gap:10px;align-items:flex-start"><div style="flex:1"><h1 style="font-size:22px">New task report</h1><p class="muted" style="margin:6px 0 0;font-size:13px">Queued in the platform’s Task Report Queue; Flywheel builds the CSV and keeps it on the project.</p></div><button class="ib" data-cancel="1" aria-label="Close">' + IC.close + '</button></div>' +
+      '<div class="lab">Protocol</div><div class="mono" style="padding:8px 12px;border:1px solid var(--line2);border-radius:10px;background:var(--panel2)">' + esc(d.protocol) + (d.version ? ' · v' + esc(d.version) : '') + '</div>' +
+      '<div class="lab">Report</div><div class="opt">' + REPORT_TYPES.map(function (o) { return '<button class="ob" data-rt="' + o[0] + '" aria-pressed="' + (d.types.indexOf(o[0]) > -1) + '">' + o[1] + '</button>'; }).join('') + '</div>' +
+      '<p class="muted" style="margin:0;font-size:12px">Forms and annotations: every form response and annotation on this protocol’s tasks. Task details: one row per task with status, assignee and timestamps. Pick both to queue two reports.</p>' +
+      '<details><summary>Request</summary><pre>' + esc(d.types.map(function (t) { return 'POST /api/' + t + '/reports\n' + JSON.stringify({ protocol_id: d.protocolId, project_id: S.project, version: d.version, metadata_columns: d.columns }, null, 2); }).join('\n\n')) + '</pre></details>' +
+      (!S.showNames ? '<p style="margin:0;font-size:12px;color:var(--warn)">Reader names are coded here, but the report lists assignees as stored.</p>' : '') +
+      (!d.protocolId ? '<p style="margin:0;font-size:12px;color:var(--bad)">This protocol’s tasks carry no protocol ID, so the queue can’t take it.</p>' : '') +
+      '<div style="display:flex;justify-content:flex-end;gap:8px"><button class="btn" data-cancel="1">Cancel</button><button class="btn primary" data-run-export="1"' + (bad || S.busy ? ' disabled' : '') + '>Queue ' + (d.types.length > 1 ? d.types.length + ' reports' : 'report') + '</button></div></div></div>';
   }
   function diag() {
     var sample = S.tasks[0] ? JSON.stringify(S.tasks[0], null, 2) : '(none)';
@@ -809,12 +796,11 @@ summary{cursor:pointer;color:#A9D2FA;font-size:13px}
     all('[data-to]', function (b) { b.onclick = function () { S.reassign.to = b.getAttribute('data-to'); render(); }; });
     all('[data-confirm-reassign]', function (b) { b.onclick = function () { var r = S.reassign; reassign(S.tasks.filter(function (t) { return r.ids.indexOf(t._id || t.id) > -1; }), r.to); }; });
     all('[data-cancel]', function (b) { b.onclick = function () { S.reassign = null; S.exportDlg = null; render(); }; });
-    all('[data-export]', function (b) { b.onclick = function () { if (!sc || !sc.first) return; S.exportDlg = { level: 'project', protocol: sc.first.protocol_label, forms: 'task', ann: 'task' }; render(); }; });
-    all('[data-lv]', function (b) { b.onclick = function () { S.exportDlg.level = b.getAttribute('data-lv'); render(); }; });
-    all('[data-fr]', function (b) { b.onclick = function () { S.exportDlg.forms = b.getAttribute('data-fr'); render(); }; });
-    all('[data-an]', function (b) { b.onclick = function () { S.exportDlg.ann = b.getAttribute('data-an'); render(); }; });
+    all('[data-export]', function (b) { b.onclick = function () { if (!sc || !sc.first) return; var f = sc.first; S.exportDlg = { protocol: f.protocol_label, protocolId: f.protocol_id, version: f.protocol_version, types: ['form_and_annotation'], columns: REPORT_COLUMNS.slice() }; render(); }; });
+    all('[data-rt]', function (b) { b.onclick = function () { var t = b.getAttribute('data-rt'), ts = S.exportDlg.types, k = ts.indexOf(t); if (k > -1) ts.splice(k, 1); else ts.push(t); render(); }; });
     all('[data-run-export]', function (b) { b.onclick = function () { runExport(S.exportDlg); }; });
-    all('[data-dl]', function (b) { b.onclick = function () { var p = b.getAttribute('data-dl').split('|'), a = (S.analyses[S.project] || []).filter(function (x) { return (x._id || x.id) === p[0]; })[0]; if (a) download(a, { name: p.slice(1).join('|') }); }; });
+    all('[data-dl]', function (b) { b.onclick = function () { var r = (S.reports[S.project] || []).filter(function (x) { return (x._id || x.id) === b.getAttribute('data-dl'); })[0]; if (r) download(r); }; });
+    all('[data-del-rep]', function (b) { b.onclick = function () { var r = (S.reports[S.project] || []).filter(function (x) { return (x._id || x.id) === b.getAttribute('data-del-rep'); })[0]; if (!r) return; var rid = r._id || r.id; if (S.delPending === rid && Date.now() - S.delAt > 400) { S.delPending = null; deleteReport(r); } else if (S.delPending !== rid) { S.delPending = rid; S.delAt = Date.now(); render(); } }; });
   }
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { if (S.reassign || S.exportDlg) { S.reassign = null; S.exportDlg = null; } else { S.readerSel = null; S.caseSel = null; } render(); } });
   var lastRefresh = 0;
@@ -865,9 +851,9 @@ summary{cursor:pointer;color:#A9D2FA;font-size:13px}
       [1, 2].forEach(function (rn) { var u = rnd(), s = pg < 0.4 ? (u < 0.9 ? 'completed' : 'in_progress') : pg < 0.6 ? (u < 0.5 ? 'in_progress' : 'todo') : 'todo'; mk(onc, 'RECIST 1.1 longitudinal read', pidO, '1', j, rn, users[[2, 4, 6, 7, 0][(j + rn) % 5]], crO, dueO, s, 34); });
     }
     for (var k = 0; k < 4; k++) mk(projects[3], 'GA area \u00b7 FAF', hex(24), '1', 900 + k, 1, me, iso(-10), iso(5), k < 2 ? 'completed' : 'todo', 9);
-    var analyses = {}; analyses[tbi._id] = [{ _id: hex(24), label: 'Task Admin export · Hemorrhage read · CT head · ' + iso(-12).slice(0, 16).replace('T', ' '), created: iso(-12, 17), gear_info: { name: GEAR_NAME, version: '0.1.5' }, job: { id: hex(24), state: 'complete' }, files: [{ name: 'form-responses-' + iso(-12).slice(0, 10) + '_17-05-12.csv', size: 143000 }, { name: 'annotations-' + iso(-12).slice(0, 10) + '_17-05-12.csv', size: 273000 }] }];
-    var jobs = {};
-    function csv(pid) {
+    var reports = [{ _id: hex(24), project_id: tbi._id, protocol_id: pidR, report_type: 'form_and_annotation', status: 'completed', created: iso(-12, 17), size: 146000, origin: { type: 'user', id: me._id } }];
+    function csv(pid, type) {
+      if (type === 'task_detail') return 'Task ID,Protocol Label,Task Assignee,Task Status,Subject Label,Completed\n' + tasks.filter(function (t) { return t.parents.project === pid; }).slice(0, 80).map(function (t) { var u = users.filter(function (x) { return x._id === (t.assignee || {}).id; })[0]; return [t.task_id, t.protocol_label, u ? u.email : '', t.status, t.parent_details.subject_label, doneAt(t) || ''].join(','); }).join('\n') + '\n';
       var head = 'Task ID,Task Type,Protocol Label,Task Assignee,Task Status,Subject Label,Session Label,Question,Answer\n';
       return head + tasks.filter(function (t) { return t.parents.project === pid && t.status === 'completed' && !t.adjudication; }).slice(0, 60).map(function (t) { var u = users.filter(function (x) { return x._id === t.assignee.id; })[0]; return [t.task_id, 'Read', t.protocol_label, u ? u.email : '', 'Complete', t.parent_details.subject_label, 'V1', 'Hemorrhage present', rnd() < 0.7 ? 'Yes' : 'No'].join(','); }).join('\n') + '\n';
     }
@@ -880,23 +866,11 @@ summary{cursor:pointer;color:#A9D2FA;font-size:13px}
       if (method === 'GET' && path === '/api/roles') return ok(roles);
       if (method === 'GET' && (m = /^\/api\/projects\/([^/]+)$/.exec(path))) { var pp = projects.filter(function (p) { return p._id === m[1]; })[0]; return pp ? ok(pp) : no(404); }
       if (method === 'GET' && path === '/api/users') return ok(users.concat([me]));
-      if (method === 'GET' && path === '/api/gears') return ok([{ _id: 'gear-fae-015', gear: { name: GEAR_NAME, version: '0.1.5', label: 'Form and Annotation Exporter' }, category: 'analysis' }]);
-      if (method === 'GET' && (m = /^\/api\/projects\/([^/]+)\/analyses$/.exec(path))) return ok(analyses[m[1]] || []);
+      if (method === 'GET' && path === '/api/reports') { reports.forEach(function (r) { if (r.t0) { var el = Date.now() - r.t0; r.status = el < 2500 ? 'pending' : el < 6000 ? 'in_progress' : 'completed'; if (r.status === 'completed') { r.size = r.report_type === 'task_detail' ? 38000 : 146000; delete r.t0; } } }); return ok({ count: reports.length, total: reports.length, results: reports.filter(function (r) { return !params || !params.project_id || r.project_id === params.project_id; }) }); }
       if (method === 'PUT' && (m = /^\/api\/tasks\/reader\/([^/]+)\/assign$/.exec(path))) { var t = tasks.filter(function (x) { return x._id === m[1]; })[0]; if (!t) return no(404); t.assignee = body.assignee; return ok({ modified: 1 }); }
-      if (method === 'POST' && (m = /^\/api\/containers\/([^/]+)\/analyses$/.exec(path))) {
-        var pid = projects.some(function (p) { return p._id === m[1]; }) ? m[1] : tbi._id, jid = hex(24), aid = hex(24), stamp = new Date().toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-');
-        var an = { _id: aid, label: body.label, created: new Date().toISOString(), gear_info: { name: GEAR_NAME, version: '0.1.5' }, job: jid, files: [] };
-        jobs[jid] = { state: 'pending', t0: Date.now(), aid: aid, pid: pid, stamp: stamp, config: body.job.config };
-        (analyses[pid] = analyses[pid] || []).unshift(an);
-        return ok({ _id: aid, job: jid });
-      }
-      if (method === 'GET' && (m = /^\/api\/jobs\/([^/]+)$/.exec(path))) {
-        var j = jobs[m[1]]; if (!j) return no(404);
-        var el = Date.now() - j.t0; j.state = el < 2500 ? 'pending' : el < 7000 ? 'running' : 'complete';
-        if (j.state === 'complete' && !j.done) { j.done = true; var an2 = (analyses[j.pid] || []).filter(function (a) { return a._id === j.aid; })[0]; var f = []; if (j.config['form-responses-scope'] !== 'none') f.push({ name: 'form-responses-' + j.stamp + '.csv', size: 146000 }); if (j.config['annotations-scope'] === 'task' || j.config['annotations-scope'] === 'both') f.push({ name: 'annotations-' + j.stamp + '.csv', size: 275000 }); an2.files = f; an2.job = { id: m[1], state: 'complete' }; }
-        return ok({ id: m[1], state: j.state, destination: { type: 'analysis', id: j.aid } });
-      }
-      if (method === 'GET' && (m = /^\/api\/analyses\/([^/]+)\/files\/(.+)$/.exec(path))) { var pj = Object.keys(analyses).filter(function (k) { return analyses[k].some(function (a) { return a._id === m[1]; }); })[0]; return ok(csv(pj)); }
+      if (method === 'POST' && (m = /^\/api\/(form_and_annotation|task_detail)\/reports$/.exec(path))) { var nr = { _id: hex(24), project_id: body.project_id, protocol_id: body.protocol_id, report_type: m[1], status: 'pending', created: new Date().toISOString(), origin: { type: 'user', id: me._id }, t0: Date.now() }; reports.unshift(nr); return ok(nr); }
+      if (method === 'GET' && (m = /^\/api\/(form_and_annotation|task_detail)\/reports\/([^/]+)\/csv$/.exec(path))) { var rr = reports.filter(function (r) { return r._id === m[2]; })[0]; return rr ? ok(csv(rr.project_id, m[1])) : no(404); }
+      if (method === 'DELETE' && (m = /^\/api\/(form_and_annotation|task_detail)\/reports\/([^/]+)$/.exec(path))) { reports = reports.filter(function (r) { return r._id !== m[2]; }); return ok({ deleted: 1 }); }
       return no(404);
     }
     return { request: request, me: me };

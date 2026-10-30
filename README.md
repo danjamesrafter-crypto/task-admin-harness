@@ -21,7 +21,6 @@ Open the page with `#demo` on the end of the URL, or click **Use demo data** on 
 
 ```json
 {
-  "exporter_gear": "form-and-annotations-exporter",
   "typical_minutes": [12, 30],
   "pace_floor_minutes": 8,
   "stage_warn_days": { "await": 14, "partial": 5, "compare": 1, "adj": 7 }
@@ -38,10 +37,10 @@ To open it, go to a project, then its Applications menu, then **Task Admin Conso
 | Workflow | tasks (reads + adjudication tasks on the same container) | Stages each case: awaiting reads → some reads in → waiting on comparison → adjudicating → final (no adjudication / adjudicated). Shows time in stage, gap between reads, adjudication rate and turnaround. |
 | Readers | tasks (`transitions`) | Workload bars, a strip of read times (in progress → completed), a sortable table, and a reader drawer with **Reassign not-started reads**. |
 | Cases | tasks | One row per container, with a drawer listing every task on it, **Open in viewer** and **Reassign**. |
-| Exports | gears, project analyses, jobs | Runs **form-and-annotations-exporter** with the gear's own config, tracks the job (queued → running → files ready), downloads the CSVs, and shows "N tasks completed since this export". |
+| Exports | `GET /api/reports`, `POST /api/{type}/reports`, `GET …/reports/{id}/csv`, `DELETE …/reports/{id}` | Uses the platform's **Task Reports Queue** (the same queue as the project's *Task Report Queue* tab). Queues a *Forms and annotations* and/or *Task details* report for the selected protocol, tracks it (queued → building → ready), downloads the CSV, deletes old reports, and shows "N tasks completed since this report". |
 | Diagnostics | — | Every call made, which columns the server accepted, the `subcategory` values seen, and one raw task. |
 
-The only things it writes are **reassign** (`PUT /api/tasks/reader/{id}/assign`, the same call the Reader Shell's Claim uses) and **launching the exporter gear**.
+The only things it writes are **reassign** (`PUT /api/tasks/reader/{id}/assign`, the same call the Reader Shell's Claim uses) and **task reports** (queue and delete, through the platform's report queue).
 
 ## What the spike learns (check Diagnostics)
 1. Does an admin's `GET /api/tasks/reader` return every task on the project, including other readers' and blocked adjudication tasks? Which extra columns are accepted at a full page size?
@@ -52,13 +51,12 @@ The only things it writes are **reassign** (`PUT /api/tasks/reader/{id}/assign`,
    - `completed`: resolved.
 3. `GET /api/users`: is it allowed for this role? If not, names fall back to short IDs. A project-permissions lookup is the next fallback.
 4. Reassign: does `PUT …/assign` work for an admin on someone else's task? Does it appear in the task history?
-5. Exporter (VERIFY):
-   - **Find the gear:** `GET /api/gears?filter=gear.name=…`.
-   - **Launch:** `POST /api/containers/{id}/analyses?job=true` with `{label, job:{gear_id, config, inputs:{}}}`. If that fails it tries `POST /api/jobs/add`.
-   - **Track:** `GET /api/jobs/{id}`.
-   - **Find past exports:** `GET /api/projects/{id}/analyses`, filtered on `gear_info.name`.
-   - **Download:** `GET /api/analyses/{id}/files/{name}`. The browser may block downloads inside Flywheel's frame; if so, the files are on the project's Analyses tab.
-6. Exports are matched to a protocol by the analysis label this harness writes (`Task Admin export · <protocol> · <date>`). An export run elsewhere counts as project-wide.
+5. Task Reports Queue (read from the core 23.x web app; VERIFY live):
+   - **List:** `GET /api/reports?project_id=…&sort=created:desc`. Records carry `report_type`, `protocol_id`, `status` (`pending` / `in_progress` / `completed` / `failed` / `canceled`), `created` and `size`.
+   - **Queue:** `POST /api/{form_and_annotation|task_detail}/reports` with `{protocol_id, project_id, version, metadata_columns}`. The core UI sends a fixed column list, and the harness sends the same one.
+   - **Download:** `GET /api/{type}/reports/{id}/csv`. Core sends `Accept: text/csv`, which the SDK proxy can't set; check that the proxy returns the CSV text.
+   - **Delete:** `DELETE /api/{type}/reports/{id}`.
+   - **Permissions:** `tasks_report_read`, `tasks_report_create` and `tasks_report_delete`, behind the core feature flag `tasks_refactor`.
 
 ## Path to production (same pattern as the Reader Shell)
 This harness is the spike tool. The product follows the deployment pattern the Reader Shell settled on, taken from the Uploader and the Data Contributor Dashboard (MR !620 docs build):
@@ -78,7 +76,7 @@ Platform asks that affect this app:
 ## Not in this harness yet
 - **Agreement between reads and the answers matrix:** these need form responses per task (the form-responses page model in SDK 23). This is the next step.
 - **Queries and notifications:** these are product concepts (late 2026 and 2027) with no API yet; they stay in the design prototype.
-- **Coded reader names:** the toggle is display-only, and the exporter writes assignee emails as stored.
+- **Coded reader names:** the toggle is display-only, and task reports list assignees as stored.
 
 ## Related
 - Design prototype canvas: "Task Admin Console" (claude.ai artifact)
