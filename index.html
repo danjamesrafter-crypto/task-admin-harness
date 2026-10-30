@@ -1,0 +1,893 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Task Admin Console (live harness)</title>
+<!--
+  Task Admin Console, live-data harness. Sister app to the Reader Shell harness.
+  Runs as a Flywheel extension app (Viewer type, matched to projects). All data goes through the
+  Extension SDK's apiRequest proxy, so this page never sees a token.
+  Open with #demo (or the "Use demo data" button) to run on mock data shaped like the 23.x API.
+  Spike harness, not the product: the product mounts at /admin/ (or a route in core), like /reader/.
+  Every endpoint marked VERIFY is an assumption; the Diagnostics panel records what the server accepted.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Noto+Serif:wght@400&display=swap" rel="stylesheet">
+<style>
+:root{color-scheme:dark;--bg:#070D18;--panel:#0E1A2B;--panel2:#0B1525;--line:#1E2F4A;--line2:#27395A;--fg:#E7EAF0;--mute:#A3ACBA;--dim:#7F8897;--accent:#2269E9;--warn:#F5C98A;--bad:#FF9B93;--ok:#7DDBAE;
+--c-done:#4CC38A;--c-ip:#B080FC;--c-todo:#4C7CF0;--c-od:#F2645A;--c-un:#F0B35E;--c-blk:#5B6B85}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 "Inter Tight",system-ui,sans-serif}
+html{scrollbar-color:#27395A #070D18;scrollbar-width:thin}
+button{font:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #5AA9F0;outline-offset:2px}
+h1{margin:0;font:400 28px/1.15 "Noto Serif",Georgia,serif;letter-spacing:-.01em}
+h2{margin:0;font-size:15px;font-weight:600}
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:13px}
+.num{font-variant-numeric:tabular-nums}
+.muted{color:var(--mute)}.dim{color:var(--dim)}
+.shell{display:flex;min-height:100vh}
+.rail{position:sticky;top:0;height:100vh;flex:none;width:236px;display:flex;flex-direction:column;gap:14px;padding:16px 12px;border-right:1px solid #182740;background:#0A1322;overflow-y:auto}
+.rail.min{width:68px;align-items:center}
+.brand{display:flex;align-items:flex-start;gap:8px}
+.brand .nm{flex:1;display:flex;flex-direction:column;gap:4px;padding-left:4px;min-width:0}
+.brand .nm span{font-size:10px;letter-spacing:.08em;color:var(--mute);text-transform:uppercase;white-space:nowrap}
+.ib{width:34px;height:34px;flex:none;border-radius:9px;border:1px solid var(--line);background:transparent;color:#C9D0DA;display:flex;align-items:center;justify-content:center;padding:0}
+.ib:hover,.hov:hover{background:#162842}
+.ib svg{width:18px;height:18px}
+.rl{font-size:11px;font-weight:500;color:var(--mute);text-transform:uppercase;letter-spacing:.06em;padding:0 8px}
+.pj{display:flex;align-items:center;gap:8px;width:100%;min-height:38px;padding:0 8px;border-radius:9px;border:none;background:transparent;color:var(--fg);text-align:left;font:600 13px "IBM Plex Mono",monospace}
+.pr{display:flex;align-items:center;gap:8px;width:100%;min-height:38px;padding:6px 10px 6px 30px;border-radius:9px;border:none;background:transparent;color:#C9D0DA;text-align:left;font-size:13px;font-weight:500}
+.pr[aria-current="page"]{background:#16294A;color:#fff}
+.pr .v{color:var(--mute);font-weight:400}
+.cnt{margin-left:auto;font-size:11px;font-weight:600;padding:1px 7px;border-radius:999px;background:rgba(242,100,90,.18);color:var(--bad)}
+.mini{width:44px;height:44px;border-radius:10px;border:1px solid var(--line);background:transparent;color:#C9D0DA;font:600 10px "IBM Plex Mono",monospace;overflow:hidden}
+.mini[aria-current="true"]{border-color:var(--accent);background:#16294A;color:#fff}
+.me{margin-top:auto;display:flex;align-items:center;gap:10px;padding-top:12px;border-top:1px solid #182740}
+.av{width:30px;height:30px;border-radius:999px;background:#1A2B45;color:#C9D0DA;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex:none}
+.main{flex:1;min-width:0;padding:24px 28px 48px;display:flex;flex-direction:column;gap:18px}
+.top{display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px}
+.top .t{flex:1 1 320px;min-width:0;display:flex;flex-direction:column;gap:6px}
+.crumb{font:12px "IBM Plex Mono",monospace;color:var(--mute)}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;background:var(--panel);border:1px solid var(--line);font-size:12px;color:#C9D0DA}
+.chip.live i{width:8px;height:8px;border-radius:99px;background:var(--c-done)}
+.chip.demo{border-color:#6B5530;color:var(--warn)}
+.btn{height:38px;padding:0 14px;border-radius:10px;border:1px solid var(--line2);background:var(--panel);color:var(--fg);font-weight:500;font-size:13px;display:inline-flex;align-items:center;gap:8px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.btn.sm{height:32px;padding:0 10px;font-size:12px}
+.btn:disabled{opacity:.5;cursor:default}
+.tabs{display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid #182740}
+.tab{height:42px;padding:0 14px;border:none;background:none;color:var(--mute);font-weight:500;border-bottom:2px solid transparent;margin-bottom:-1px;display:flex;align-items:center;gap:8px}
+.tab[aria-current="page"]{color:#fff;border-color:var(--accent)}
+.badge{font-size:11px;font-weight:600;padding:1px 7px;border-radius:999px;background:rgba(240,179,94,.18);color:var(--warn)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:4px}
+.kpi .l{font-size:11px;font-weight:500;color:var(--mute);text-transform:uppercase;letter-spacing:.05em}
+.kpi .v{font-size:28px;font-weight:500;line-height:1.1;font-variant-numeric:tabular-nums}
+.kpi .s{font-size:12px;color:var(--mute)}
+.row{display:flex;flex-wrap:wrap;gap:16px;align-items:stretch}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.ph{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px}.ph h2{flex:1}
+.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:#C9D0DA}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:10px;height:10px;border-radius:3px;display:inline-block;flex:none}
+.donut{position:relative;width:156px;height:156px;border-radius:999px;flex:none}
+.donut>div{position:absolute;inset:22px;border-radius:999px;background:var(--panel);display:flex;flex-direction:column;align-items:center;justify-content:center}
+.tbl{border:1px solid var(--line);border-radius:14px;overflow:auto;background:var(--panel)}
+table{width:100%;border-collapse:collapse;min-width:820px}
+th{font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.05em;color:var(--mute);text-align:left;padding:10px 14px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:10px 14px;border-bottom:1px solid #16243A;vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tbody tr:hover{background:#112036}
+.lnk{border:none;background:none;padding:0;color:var(--fg);font-weight:500;text-align:left;min-height:32px}
+.lnk:hover{color:#AEB8FF;text-decoration:underline}
+.pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:500;white-space:nowrap}
+.sorth{border:none;background:none;padding:0;color:inherit;font:inherit;text-transform:inherit;letter-spacing:inherit}
+.sorth[data-on="1"]{color:var(--fg)}
+.bar{display:flex;height:12px;border-radius:4px;overflow:hidden;background:#13233A}
+.strip{position:relative;height:22px}
+.strip .band{position:absolute;top:2px;bottom:2px;background:rgba(143,179,255,.08);border-radius:4px}
+.strip .ax{position:absolute;top:11px;left:0;right:0;border-top:1px solid var(--line)}
+.strip i{position:absolute;top:7px;width:9px;height:9px;margin-left:-4px;border-radius:99px;opacity:.85}
+.strip b{position:absolute;top:1px;bottom:1px;width:2px;margin-left:-1px;background:#E7EAF0;border-radius:1px}
+.attn{display:flex;align-items:flex-start;gap:10px;width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--fg);text-align:left}
+.stage{display:flex;flex-direction:column;gap:6px;width:100%;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--panel2);color:var(--fg);text-align:left}
+.stage[aria-pressed="true"]{border-color:var(--accent);background:#16294A}
+.flow{display:flex;align-items:stretch;min-width:900px}
+.flow .col{flex:1;min-width:0;display:flex;flex-direction:column;gap:10px}
+.flow .arr{width:32px;flex:none;display:flex;align-items:center;justify-content:center;color:#3A4E70}
+.empty{padding:28px;text-align:center;color:var(--mute)}
+.banner{padding:12px 14px;border-radius:12px;border:1px solid rgba(240,179,94,.45);background:rgba(240,179,94,.08);color:#F3E3C7}
+.scrim{position:fixed;inset:0;background:rgba(3,7,14,.6);z-index:20;border:none;padding:0;cursor:default}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:480px;max-width:100%;z-index:21;background:var(--panel2);border-left:1px solid var(--line2);box-shadow:-24px 0 48px rgba(0,0,0,.45);overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:16px}
+.modal{position:fixed;inset:0;z-index:30;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(3,7,14,.72)}
+.dlg{width:100%;max-width:560px;max-height:92vh;overflow-y:auto;background:var(--panel);border:1px solid var(--line2);border-radius:14px;padding:22px;display:flex;flex-direction:column;gap:16px}
+.opt{display:flex;flex-wrap:wrap;gap:6px}
+.ob{height:34px;padding:0 12px;border-radius:999px;border:1px solid var(--line2);background:transparent;color:#C9D0DA;font-size:13px;font-weight:500}
+.ob[aria-pressed="true"]{border-color:var(--accent);background:#16294A;color:#fff}
+.lab{font-size:11px;font-weight:500;color:var(--mute);text-transform:uppercase;letter-spacing:.06em}
+.kv{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid #16243A;font-size:13px}
+.kv span:first-child{color:var(--mute)}
+pre{white-space:pre-wrap;word-break:break-word;font:12px/1.5 "IBM Plex Mono",monospace;color:#C9D0DA;margin:8px 0 0}
+details{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:10px 14px}
+summary{cursor:pointer;color:#A9D2FA;font-size:13px}
+.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);max-width:calc(100% - 32px);padding:10px 14px;border-radius:10px;background:#E7EAF0;color:#0A1322;font-weight:500;z-index:40;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.file{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:var(--panel2);border:1px solid #16243A}
+.steps{display:flex;gap:6px}.steps div{flex:1;display:flex;flex-direction:column;gap:5px}.steps i{height:4px;border-radius:99px;display:block}.steps span{font-size:11px}
+@media (max-width:760px){.rail{width:68px;align-items:center}.rail .hide-min{display:none}.main{padding:18px 14px 40px}}
+</style>
+</head>
+<body>
+<div id="app"><div style="padding:24px" class="muted">Connecting to Flywheel…</div></div>
+<script src="https://cdn.flywheel.io/sdk/extension/flywheel-extension-0.14.9.min.js"></script>
+<script>
+(function () {
+  'use strict';
+  var app = document.getElementById('app');
+  var S = {
+    ext: null, demo: false, user: null, origin: '', params: {}, opener: null,
+    tasks: [], projects: {}, users: {}, loading: true, error: null, log: [], updated: null,
+    project: null, protocol: null, screen: 'overview', rail: false,
+    sortKey: 'od', sortDir: 'desc', wfStage: 'all', caseFilter: 'all', showNames: true,
+    readerSel: null, caseSel: null, reassign: null, exportDlg: null, toast: '', busy: false,
+    gear: null, gearState: 'idle', analyses: {}, jobs: {}, subcats: {}
+  };
+  try { var rs = localStorage.getItem('taskAdmin.railCollapsed'); if (rs !== null) S.rail = rs === '1'; } catch (e) {}
+
+  var MARK = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 38.83" style="width:22px;height:auto" role="img" aria-label="Flywheel"><defs><linearGradient id="fwg" x1="-1.23" y1="47.5" x2="30.03" y2="-4.02" gradientTransform="translate(-5)" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#093af6"/><stop offset="0.5" stop-color="#1b68fa"/><stop offset="0.92" stop-color="#b080fc"/></linearGradient></defs><path fill="url(#fwg)" d="M27.46.79a1.25,1.25,0,0,0-1.63-.7L.79,10.14A1.25,1.25,0,0,0,0,11.3V19a1.22,1.22,0,0,0,.09.46,1.26,1.26,0,0,0,1.63.7l25-10a1.25,1.25,0,0,0,.79-1.16V1.25A1.18,1.18,0,0,0,27.46.79ZM22.33,14.71.79,23.27A1.25,1.25,0,0,0,0,24.43V34.5a1.26,1.26,0,0,0,.76,1.15L8,38.73a1.19,1.19,0,0,0,.49.1,1.25,1.25,0,0,0,1.26-1.25v-6.7a1.25,1.25,0,0,1,.79-1.16l12.7-5A1.25,1.25,0,0,0,24,23.54V15.88a1.27,1.27,0,0,0-.09-.47A1.25,1.25,0,0,0,22.33,14.71Z"/></svg>';
+  var IC = {
+    collapse: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="4"/><path d="M9 4v16M15.5 10l-2 2 2 2"/></svg>',
+    expand: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="4"/><path d="M9 4v16M13.5 10l2 2-2 2"/></svg>',
+    close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+    chev: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
+    arrow: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10h13M11 5l5 5-5 5"/></svg>',
+    refresh: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/></svg>',
+    doc: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5M10 13h6M10 17h6"/></svg>'
+  };
+  var COL = { completed: 'var(--c-done)', in_progress: 'var(--c-ip)', todo: 'var(--c-todo)', overdue: 'var(--c-od)', unassigned: 'var(--c-un)', blocked: 'var(--c-blk)', cancelled: '#3A4E70' };
+  var BADGE = { completed: ['rgba(76,195,138,.16)', '#7DDBAE'], in_progress: ['rgba(176,128,252,.18)', '#CDB0FF'], todo: ['rgba(76,124,240,.20)', '#B4C8FF'], overdue: ['rgba(242,100,90,.18)', '#FF9B93'], unassigned: ['rgba(240,179,94,.18)', '#F5C98A'], blocked: ['rgba(91,107,133,.25)', '#C9D0DA'], cancelled: ['rgba(58,78,112,.3)', '#A3ACBA'] };
+  var LABEL = { completed: 'Complete', in_progress: 'In progress', todo: 'Not started', overdue: 'Overdue', unassigned: 'Unassigned', blocked: 'Blocked', cancelled: 'Cancelled' };
+
+  function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function note(line) { S.log.push(new Date().toLocaleTimeString() + '  ' + line); if (S.log.length > 600) S.log.shift(); }
+  function day(iso) { var p = String(iso).slice(0, 10).split('-'); return new Date(+p[0], +p[1] - 1, +p[2]); }
+  function today0() { var t = new Date(); t.setHours(0, 0, 0, 0); return t; }
+  function days(iso) { return iso ? Math.round((day(iso) - today0()) / 864e5) : null; }
+  function fmt(iso) { return iso ? day(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '—'; }
+  function fmtT(iso) { return iso ? new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'; }
+  function median(a) { if (!a.length) return null; var s = a.slice().sort(function (x, y) { return x - y; }), h = s.length >> 1; return s.length % 2 ? s[h] : (s[h - 1] + s[h]) / 2; }
+  function natural(a, b) { return String(a).localeCompare(String(b), undefined, { numeric: true }); }
+  function plural(n, w) { return n + ' ' + w + (n === 1 ? '' : 's'); }
+  function rows(r) { return Array.isArray(r) ? r : (r && (r.results || r.items || r.data)) || []; }
+  function flash(m) { S.toast = m; render(); clearTimeout(flash.t); flash.t = setTimeout(function () { S.toast = ''; render(); }, 3400); }
+  function errMsg(e) { return e && (e.status || e.message) || String(e); }
+
+  // ---------------------------------------------------------------- connection
+  function flywheelOrigin() {
+    try { if (location.ancestorOrigins && location.ancestorOrigins.length) return location.ancestorOrigins[0]; } catch (e) {}
+    try { return new URL(document.referrer).origin; } catch (e) { return ''; }
+  }
+  function connect() {
+    if (/demo/.test(location.hash) || /demo=1/.test(location.search)) return startDemo();
+    if (!window.Flywheel || !Flywheel.initExtension) { fail('The Flywheel Extension SDK did not load from cdn.flywheel.io.'); return; }
+    var timer = setTimeout(function () { if (!S.ext) fail('No connection from Flywheel. Open this page from a project’s Applications menu inside Flywheel, or use demo data.'); }, 8000);
+    Flywheel.initExtension({ scope: 'ReadWrite', validateOrigin: function (o) { return /^https:\/\/[a-z0-9.-]+\.flywheel\.io$/.test(o); } })
+      .then(function (ext) {
+        clearTimeout(timer);
+        S.ext = ext; S.user = ext.user || null; S.params = ext.params || {}; S.origin = flywheelOrigin();
+        S.opener = ext.container || null;
+        if (S.opener && S.opener.container_type === 'project') S.project = S.opener._id;
+        note('Connected. Origin ' + (S.origin || 'unknown') + '. User ' + (S.user ? S.user._id : 'unknown') + '. Opened from ' + (S.opener ? S.opener.container_type + ' ' + S.opener._id : 'no container') + '.');
+        note('Application options: ' + JSON.stringify(S.params));
+        fromHash();
+        return load();
+      })
+      .catch(function (e) { clearTimeout(timer); fail('Could not connect: ' + errMsg(e)); });
+  }
+  function fail(msg) { S.loading = false; S.error = msg; note('ERROR ' + msg); render(); }
+  function api(method, path, params, body) {
+    note(method + ' ' + path + (params ? ' ' + JSON.stringify(params) : '') + (body ? ' body ' + JSON.stringify(body).slice(0, 300) : ''));
+    var p = S.demo ? DEMO.request(method, path, params, body) : S.ext.apiRequest(method, path, params, body);
+    return p.then(function (r) { note('  ok'); return r; }, function (e) { note('  failed: ' + errMsg(e)); throw e; });
+  }
+
+  // ---------------------------------------------------------------- loading tasks
+  // Task Manager's own column list (known to work on 23.x, from the Reader Shell harness on r6nvg8).
+  // Admins are not blinded, so the label columns the reader harness drops are kept here.
+  var SAFE = 'task_id,created,status,priority,protocol_label,assignee,parents,due_date,subcategory,parent_details.project_label,parent_details.subject_label,creator,parent_ref';
+  var EXTRA = ['transitions', 'read_number', 'adjudication', 'protocol_id', 'protocol_version', 'staffing_pool', 'modified', 'parent_details.session_label'];
+  var accepted = null;
+  function probe() {
+    accepted = [];
+    return EXTRA.reduce(function (p, col) {
+      return p.then(function () {
+        return api('GET', '/api/tasks/reader', { limit: 1, skip: 0, columns: SAFE + ',' + col })
+          .then(function () { accepted.push(col); note('  column ' + col + ': accepted'); }, function () { note('  column ' + col + ': rejected'); });
+      });
+    }, Promise.resolve());
+  }
+  function load(silent) {
+    if (!silent) { S.loading = true; render(); }
+    var all = [], seen = {}, LIMIT = 100;
+    var attempts = [{ sort: 'created:desc,task_id:asc', extra: true }, { sort: 'created:desc', extra: true }, { sort: 'created:desc', extra: false }], ai = 0;
+    function cols() { return SAFE + (attempts[ai].extra && accepted && accepted.length ? ',' + accepted.join(',') : ''); }
+    function get(skip) {
+      return api('GET', '/api/tasks/reader', { limit: LIMIT, skip: skip, sort: attempts[ai].sort, columns: cols() }).catch(function (e) {
+        if (ai === attempts.length - 1 || skip > 0) throw e;
+        ai++; note('  retrying with sort=' + attempts[ai].sort + (attempts[ai].extra ? '' : ' and safe columns only'));
+        return get(skip);
+      });
+    }
+    function page(skip) {
+      return get(skip).then(function (r) {
+        var rs = rows(r);
+        rs.forEach(function (t) { var k = t._id || t.id || t.task_id; if (!seen[k]) { seen[k] = 1; all.push(t); } });
+        var total = r && typeof r.total === 'number' ? r.total : null;
+        if (rs.length === LIMIT && (total == null || all.length < total) && skip < 10000) return page(skip + LIMIT);
+        note('Loaded ' + all.length + (total != null ? ' of ' + total : '') + ' tasks (sort ' + attempts[ai].sort + ', ' + (attempts[ai].extra ? 'extra columns' : 'safe columns') + ').');
+      });
+    }
+    return (accepted ? Promise.resolve() : probe()).then(function () { return page(0); })
+      .then(function () {
+        S.tasks = all; S.loading = false; S.error = null; S.updated = new Date();
+        var sc = {}; all.forEach(function (t) { var k = t.subcategory == null ? '(none)' : String(t.subcategory); sc[k] = (sc[k] || 0) + 1; }); S.subcats = sc;
+        note('subcategory values: ' + JSON.stringify(sc) + ' (used to tell reads from adjudication; VERIFY)');
+        return Promise.all([loadProjects(), loadUsers()]).then(loadPermissions);
+      })
+      .then(function () { pickDefaults(); render(); loadExports(); })
+      .catch(function (e) { if (silent) { note('Background refresh failed; keeping the current list.'); return; } fail('Could not load tasks: ' + errMsg(e)); });
+  }
+  function loadProjects() {
+    return api('GET', '/api/projects', {}).then(function (r) {
+      var m = {}; rows(r).forEach(function (p) { m[p._id || p.id] = { id: p._id || p.id, label: p.label, group: p.group }; });
+      S.projects = m; note('Projects visible to this account: ' + Object.keys(m).length + '.');
+    }, function () { note('Project list unavailable; using labels from tasks.'); });
+  }
+  // Who gets the admin view of a project. Per the reader-task tech docs (MR !620 build), GET /tasks/reader returns
+  // every task on a project only to site admins and users with tasks_assign there; tasks_view alone returns just
+  // your own and your pools'. A dashboard on that partial list would mislead, so the rail lists only projects
+  // where this account holds tasks_assign. Roles come from GET /api/roles, membership from GET /api/projects/{id}.
+  S.canAssign = {};
+  function isSiteAdmin() { var u = S.user || {}; return (u.roles || []).indexOf('site_admin') > -1 || u.root === true; }
+  function loadPermissions() {
+    var pids = {}; S.tasks.forEach(function (t) { var p = projOf(t); if (p) pids[p] = 1; });
+    var ids = Object.keys(pids);
+    if (isSiteAdmin()) { ids.forEach(function (id) { S.canAssign[id] = true; }); note('Site admin: every project with tasks gets the admin view.'); return Promise.resolve(); }
+    return api('GET', '/api/roles', {}).then(rows, function () { return null; }).then(function (roles) {
+      var acts = {}; (roles || []).forEach(function (r) { acts[r._id || r.id] = r.actions || []; });
+      if (!roles) note('GET /api/roles unavailable; assign permission can\u2019t be checked, so projects show with a caution.');
+      return ids.reduce(function (pr, id) {
+        return pr.then(function () {
+          return api('GET', '/api/projects/' + id, {}).then(function (proj) {
+            var me = (proj.permissions || []).filter(function (x) { return S.user && (x._id === S.user._id || x.id === S.user._id); })[0];
+            if (!roles || !me) { S.canAssign[id] = null; return; }
+            S.canAssign[id] = (me.role_ids || []).some(function (rid) { return (acts[rid] || []).indexOf('tasks_assign') > -1; });
+            note('  ' + projLabel(id) + ': tasks_assign ' + (S.canAssign[id] ? 'yes' : 'no'));
+          }, function () { S.canAssign[id] = null; });
+        });
+      }, Promise.resolve());
+    });
+  }
+  // Assignee names. GET /api/users needs site-admin (VERIFY); otherwise names come from the project's
+  // permissions list, and failing that a short id is shown.
+  function loadUsers() {
+    return api('GET', '/api/users', {}).then(function (r) {
+      rows(r).forEach(function (u) { S.users[u._id || u.id] = { name: ((u.firstname || '') + ' ' + (u.lastname || '')).trim() || u.email || u._id, email: u.email }; });
+      note('User names: ' + Object.keys(S.users).length + ' loaded.');
+    }, function () { note('GET /api/users not allowed for this account; showing ids for other users.'); })
+      .then(function () { if (S.user) S.users[S.user._id] = S.users[S.user._id] || { name: ((S.user.firstname || '') + ' ' + (S.user.lastname || '')).trim() || S.user.email, email: S.user.email }; });
+  }
+
+  // ---------------------------------------------------------------- task model
+  function projOf(t) { return t.parents && t.parents.project; }
+  function projLabel(id) { var p = S.projects[id]; if (p && p.label) return p.label; var t = S.tasks.filter(function (x) { return projOf(x) === id; })[0]; return (t && t.parent_details && t.parent_details.project_label) || 'Project …' + String(id).slice(-4); }
+  function isAdj(t) { return !!t.adjudication || /adjud/i.test(String(t.subcategory || '')) || /adjud/i.test(String(t.protocol_label || '')); }
+  function protoKey(t) { return String(t.protocol_id || t.protocol_label || 'Unlabelled protocol'); }
+  function protoName(t) { return (t.protocol_label || 'Unlabelled protocol') + (t.protocol_version ? ' v' + t.protocol_version : ''); }
+  function who(t) { var a = t.assignee; return a && a.type === 'user' ? a.id : null; }
+  function isPool(t) { var a = t.assignee; return !a || a.type === 'staffing_pool'; }
+  function stOf(t) {
+    if (t.status === 'completed') return 'completed';
+    if (t.status === 'cancelled') return 'cancelled';
+    if (t.status === 'blocked') return 'blocked';
+    if (isPool(t)) return 'unassigned';
+    var d = days(t.due_date); if (d != null && d < 0) return 'overdue';
+    return t.status === 'in_progress' ? 'in_progress' : 'todo';
+  }
+  function minutesOf(t) { var tr = t.transitions || {}, e = tr.completed && Date.parse(tr.completed), s = tr.in_progress ? Date.parse(tr.in_progress) : null; return e && s ? Math.max(1, Math.round((e - s) / 6e4)) : null; }
+  function doneAt(t) { return t.transitions && t.transitions.completed ? t.transitions.completed : (t.status === 'completed' ? t.modified : null); }
+  function lastAct(t) { var tr = t.transitions || {}; return tr.completed || tr.in_progress || tr.todo || null; }
+  function caseKey(t) { var r = t.parent_ref, p = t.parents || {}; return (r && r.id) || p.file || p.acquisition || p.session || t._id; }
+  function caseLabel(t) { var pd = t.parent_details || {}, r = t.parent_ref || {}; var a = pd.subject_label || ''; var b = pd.session_label || r.label || ''; return (a && b ? a + ' · ' + b : a || b) || ('Container …' + String(caseKey(t)).slice(-6)); }
+  function userName(id) {
+    if (!id) return 'Staffing pool';
+    var u = S.users[id], name = u ? u.name : 'User …' + String(id).slice(-4);
+    return S.showNames ? name : codeFor(id);
+  }
+  var CODES = {};
+  function codeFor(id) { if (!CODES[id]) CODES[id] = 'R-' + ('0' + (Object.keys(CODES).length + 1)).slice(-2); return CODES[id]; }
+  function initials(id) { if (!S.showNames) return codeFor(id).slice(2); var n = userName(id).split(/\s+/); return ((n[0] || '?')[0] + (n[1] ? n[1][0] : '')).toUpperCase(); }
+  function counts(ts) { var c = { completed: 0, in_progress: 0, todo: 0, overdue: 0, unassigned: 0, blocked: 0, cancelled: 0 }; ts.forEach(function (t) { c[stOf(t)]++; }); return c; }
+  function badge(k, label) { var b = BADGE[k] || BADGE.todo; return '<span class="pill" style="background:' + b[0] + ';color:' + b[1] + '">' + esc(label || LABEL[k] || k) + '</span>'; }
+  function donutBg(c, keys) {
+    var tot = 0, acc = 0, parts = []; keys.forEach(function (k) { tot += c[k]; });
+    if (!tot) return 'conic-gradient(#13233A 0 100%)';
+    keys.forEach(function (k) { if (!c[k]) return; var a = acc / tot * 100, b = (acc + c[k]) / tot * 100; parts.push(COL[k] + ' ' + a.toFixed(2) + '% ' + b.toFixed(2) + '%'); acc += c[k]; });
+    return 'conic-gradient(' + parts.join(',') + ')';
+  }
+
+  // Rail rule: projects visible to this account that hold at least one reader task (any status).
+  function railProjects() {
+    var m = {};
+    S.tasks.forEach(function (t) {
+      var pid = projOf(t); if (!pid) return;
+      if (Object.keys(S.projects).length && !S.projects[pid]) return; // not visible to this account
+      if (S.canAssign[pid] === false) return; // only your own tasks visible here: not an admin view
+      var p = m[pid] = m[pid] || { id: pid, protos: {} };
+      var k = protoKey(t), pr = p.protos[k] = p.protos[k] || { key: k, name: t.protocol_label || 'Unlabelled protocol', ver: t.protocol_version, n: 0, od: 0, adjOnly: true };
+      pr.n++; if (stOf(t) === 'overdue') pr.od++; if (!isAdj(t)) pr.adjOnly = false;
+    });
+    return Object.keys(m).map(function (k) { var p = m[k]; p.label = projLabel(k); p.list = Object.keys(p.protos).map(function (x) { var q = p.protos[x]; if (q.adjOnly && !/adjud/i.test(q.name)) q.name += ' (adjudication)'; return q; }).sort(function (a, b) { return (a.adjOnly - b.adjOnly) || natural(a.name, b.name); }); return p; }).sort(function (a, b) { return natural(a.label, b.label); });
+  }
+  function pickDefaults() {
+    var rp = railProjects();
+    if (!rp.length) return;
+    if (!S.project || !rp.some(function (p) { return p.id === S.project; })) {
+      var openN = function (p) { return S.tasks.filter(function (t) { return projOf(t) === p.id && t.status !== 'completed' && t.status !== 'cancelled'; }).length; };
+      S.project = rp.slice().sort(function (a, b) { return openN(b) - openN(a); })[0].id;
+    }
+    var cur = rp.filter(function (p) { return p.id === S.project; })[0];
+    if (!S.protocol || !cur.protos[S.protocol]) S.protocol = cur.list[0].key;
+  }
+  function scope() {
+    var inProj = S.tasks.filter(function (t) { return projOf(t) === S.project; });
+    var mine = inProj.filter(function (t) { return protoKey(t) === S.protocol; });
+    var protoAdj = mine.length && mine.every(isAdj);
+    // Cases: the containers this protocol's tasks point at. Adjudication tasks on the same container
+    // are attached project-wide, because adjudication may live in its own protocol (VERIFY on 23.x).
+    var reads = protoAdj ? [] : mine.filter(function (t) { return !isAdj(t); });
+    var keys = {}; (protoAdj ? mine : reads).forEach(function (t) { keys[caseKey(t)] = 1; });
+    var adjs = inProj.filter(function (t) { return isAdj(t) && keys[caseKey(t)]; });
+    if (protoAdj) reads = inProj.filter(function (t) { return !isAdj(t) && keys[caseKey(t)]; });
+    return { all: inProj, tasks: mine, reads: reads, adjs: adjs, protoAdj: protoAdj, first: mine[0] };
+  }
+
+  // ---------------------------------------------------------------- derived views
+  function readerStats(ts) {
+    var by = {}; ts.forEach(function (t) { var id = who(t); if (!id) return; (by[id] = by[id] || []).push(t); });
+    return Object.keys(by).map(function (id) {
+      var mine = by[id], c = counts(mine), mins = mine.map(minutesOf).filter(function (x) { return x != null; });
+      var last = mine.map(lastAct).filter(Boolean).sort().pop() || null;
+      return { id: id, tasks: mine, c: c, assigned: mine.length, done: c.completed, ip: c.in_progress, ns: c.todo, od: c.overdue, open: c.in_progress + c.todo + c.overdue, mins: mins, med: median(mins), last: last };
+    });
+  }
+  function cases(sc) {
+    var by = {}; sc.reads.forEach(function (t) { (by[caseKey(t)] = by[caseKey(t)] || { key: caseKey(t), reads: [], adj: null, label: caseLabel(t) }).reads.push(t); });
+    sc.adjs.forEach(function (t) { var k = caseKey(t); by[k] = by[k] || { key: k, reads: [], adj: null, label: caseLabel(t) }; by[k].adj = t; });
+    return Object.keys(by).map(function (k) {
+      var c = by[k], rs = c.reads.slice().sort(function (a, b) { return (a.read_number || 0) - (b.read_number || 0) || natural(a.task_id, b.task_id); });
+      var dn = rs.filter(function (t) { return t.status === 'completed'; }), a = c.adj, stg, ent;
+      var rel = rs.map(function (t) { return t.created; }).filter(Boolean).sort()[0] || (a && a.created);
+      var lastDone = dn.map(doneAt).filter(Boolean).sort().pop();
+      if (!rs.length && a) { stg = a.status === 'completed' ? 'finalA' : a.status === 'blocked' ? 'compare' : 'adj'; ent = a.created; }
+      else if (!dn.length) { stg = 'await'; ent = rel; }
+      else if (dn.length < rs.length) { stg = 'partial'; ent = dn.map(doneAt).filter(Boolean).sort()[0]; }
+      else if (!a) { stg = 'finalC'; ent = lastDone; }
+      // Adjudication task states (VERIFY): blocked = waiting for the platform's comparison; cancelled = reads agreed.
+      else if (a.status === 'blocked') { stg = 'compare'; ent = lastDone; }
+      else if (a.status === 'cancelled') { stg = 'finalC'; ent = (a.transitions && a.transitions.cancelled) || lastDone; }
+      else if (a.status === 'completed') { stg = 'finalA'; ent = doneAt(a); }
+      else { stg = 'adj'; ent = (a.transitions && (a.transitions.in_progress || a.transitions.todo)) || a.created; }
+      var dIn = ent ? Math.max(0, Math.round((Date.now() - Date.parse(ent)) / 864e5)) : null;
+      var fin = stg === 'finalA' || stg === 'finalC' ? (stg === 'finalA' ? doneAt(a) : lastDone) : null;
+      var stK = rs.length && dn.length === rs.length ? 'completed' : (rs.some(function (t) { return stOf(t) === 'overdue'; }) ? 'overdue' : rs.some(function (t) { return t.status === 'in_progress' || t.status === 'completed'; }) ? 'in_progress' : rs.some(isPool) ? 'unassigned' : 'todo');
+      return { key: k, label: c.label, reads: rs, done: dn.length, adj: a, stg: stg, days: dIn, rel: rel, fin: fin, stK: stK, due: rs.map(function (t) { return t.due_date; }).filter(Boolean).sort()[0] };
+    }).sort(function (x, y) { return natural(x.label, y.label); });
+  }
+
+  // ---------------------------------------------------------------- exports (form-and-annotations-exporter)
+  var GEAR_NAME = 'form-and-annotations-exporter';
+  function gearName() { return (S.params && S.params.exporter_gear) || GEAR_NAME; }
+  function loadExports() {
+    if (!S.project) return;
+    if (!S.gear && S.gearState === 'idle') {
+      S.gearState = 'loading';
+      // VERIFY: gear lookup by name. Falls back to listing all gears and matching gear.name.
+      api('GET', '/api/gears', { filter: 'gear.name=' + gearName() }).then(rows).catch(function () { return api('GET', '/api/gears', {}).then(rows); })
+        .then(function (gs) {
+          gs = gs.filter(function (g) { return g.gear && g.gear.name === gearName(); }).sort(function (a, b) { return natural(b.gear.version, a.gear.version); });
+          S.gear = gs[0] || null; S.gearState = S.gear ? 'ok' : 'missing';
+          note(S.gear ? 'Exporter gear ' + S.gear.gear.version + ' (' + (S.gear._id || S.gear.id) + ')' : 'Exporter gear not installed on this site.');
+          render();
+        }, function (e) { S.gearState = 'error'; note('Gear lookup failed: ' + errMsg(e)); render(); });
+    }
+    loadAnalyses(S.project);
+  }
+  // Past exports = this project's analyses created by the exporter gear (VERIFY: gear_info on analyses).
+  function loadAnalyses(pid, quiet) {
+    return api('GET', '/api/projects/' + pid + '/analyses', {}).then(function (r) {
+      S.analyses[pid] = rows(r).filter(function (a) { return a.gear_info && a.gear_info.name === gearName(); })
+        .sort(function (a, b) { return String(b.created).localeCompare(String(a.created)); });
+      if (!quiet) note('Exports on this project: ' + S.analyses[pid].length + '.');
+      render();
+    }, function () { S.analyses[pid] = S.analyses[pid] || []; render(); });
+  }
+  function exportProtocol(a) { var m = /^Task Admin export · (.+) · \d{4}-\d{2}-\d{2}/.exec(a.label || ''); return m ? m[1] : null; }
+  function jobState(a) { var j = a.job; if (!j) return a.files && a.files.length ? 'complete' : 'unknown'; return typeof j === 'string' ? (S.jobs[j] && S.jobs[j].state) || 'unknown' : j.state || 'unknown'; }
+  function runExport(d) {
+    var g = S.gear, gid = g && (g._id || g.id);
+    if (!gid) { flash('The exporter gear isn’t installed on this site.'); return; }
+    var config = { debug: false, protocol_name: d.protocol, 'annotations-scope': d.ann, 'form-responses-scope': d.forms, read_timeout: 60 };
+    var dest = d.level === 'session' ? d.dest : S.project;
+    var label = 'Task Admin export · ' + d.protocol + ' · ' + new Date().toISOString().slice(0, 16).replace('T', ' ');
+    S.exportDlg = null; S.busy = true; render();
+    // VERIFY: analysis + job in one call (what the SDK's gear.run does for analysis gears); fallback: jobs/add.
+    api('POST', '/api/containers/' + dest + '/analyses', { job: true }, { label: label, job: { gear_id: gid, config: config, inputs: {} } })
+      .catch(function () { return api('POST', '/api/jobs/add', undefined, { gear_id: gid, config: config, inputs: {}, destination: { type: d.level === 'session' ? 'session' : 'project', id: dest }, tags: ['task-admin-export'] }); })
+      .then(function (r) {
+        S.busy = false; flash('Export started. You can keep working; it shows below when the files are ready.');
+        var jid = r && (r.job || r.job_id || (r._id && !r.label ? r._id : null));
+        if (jid) watchJob(String(jid));
+        return loadAnalyses(S.project, true);
+      }, function (e) { S.busy = false; flash('Couldn’t start the export (' + errMsg(e) + '). See Diagnostics.'); });
+  }
+  function watchJob(id) {
+    S.jobs[id] = S.jobs[id] || { state: 'pending' };
+    var tick = function () {
+      api('GET', '/api/jobs/' + id).then(function (j) {
+        var prev = S.jobs[id].state; S.jobs[id] = { state: j.state, dest: j.destination, j: j };
+        if (prev !== j.state && (j.state === 'complete' || j.state === 'failed')) { flash(j.state === 'complete' ? 'Export ready' : 'Export failed. See the job log in Flywheel.'); loadAnalyses(S.project, true); }
+        render();
+        if (j.state === 'pending' || j.state === 'running') setTimeout(tick, S.demo ? 1500 : 5000);
+      }, function () { setTimeout(tick, 10000); });
+    };
+    tick();
+  }
+  function download(a, f) {
+    // VERIFY: file download through the extension proxy. Inside Flywheel's frame the browser may block it;
+    // the fallback is the analysis on the project's Analyses tab.
+    api('GET', '/api/analyses/' + (a._id || a.id) + '/files/' + encodeURIComponent(f.name)).then(function (body) {
+      var text = typeof body === 'string' ? body : JSON.stringify(body);
+      var url = URL.createObjectURL(new Blob([text], { type: 'text/csv' })), el = document.createElement('a');
+      el.href = url; el.download = f.name; document.body.appendChild(el); el.click(); el.remove(); setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+      flash('Downloading ' + f.name);
+    }, function () { flash('Download blocked here. Open the project’s Analyses tab in Flywheel to get the file.'); });
+  }
+
+  // ---------------------------------------------------------------- reassign (PUT /api/tasks/reader/{id}/assign, proven for claim)
+  function reassign(tasks, to) {
+    S.busy = true; render();
+    var ok = 0, fails = [];
+    tasks.reduce(function (p, t) {
+      return p.then(function () {
+        return api('PUT', '/api/tasks/reader/' + (t._id || t.id) + '/assign', undefined, { assignee: { type: 'user', id: to } })
+          .then(function () { ok++; }, function (e) { fails.push(t.task_id + ' (' + errMsg(e) + ')'); });
+      });
+    }, Promise.resolve()).then(function () {
+      S.busy = false; S.reassign = null;
+      flash(fails.length ? (ok ? ok + ' moved; ' : '') + 'couldn’t move ' + fails.join(', ') : 'Moved ' + plural(ok, 'read') + ' to ' + userName(to));
+      load(true);
+    });
+  }
+
+  // ---------------------------------------------------------------- routes
+  var SCREENS = ['overview', 'workflow', 'readers', 'cases', 'exports'];
+  function toHash() {
+    var q = []; if (S.project) q.push('project=' + S.project); if (S.protocol) q.push('protocol=' + encodeURIComponent(S.protocol)); if (S.demo) q.push('demo=1');
+    var path = S.readerSel ? 'reader/' + S.readerSel : S.caseSel ? 'case/' + encodeURIComponent(S.caseSel) : S.screen;
+    return '#/' + path + (q.length ? '?' + q.join('&') : '');
+  }
+  function fromHash() {
+    var h = (location.hash || '').replace(/^#\/?/, ''), path = h.split('?')[0], qs = {};
+    (h.split('?')[1] || '').split('&').forEach(function (kv) { if (kv) { var p = kv.split('='); qs[p[0]] = decodeURIComponent(p[1] || ''); } });
+    var parts = path.split('/');
+    S.readerSel = null; S.caseSel = null;
+    if (qs.project) S.project = qs.project; if (qs.protocol) S.protocol = qs.protocol;
+    if (parts[0] === 'reader' && parts[1]) { S.readerSel = parts[1]; return; }
+    if (parts[0] === 'case' && parts[1]) { S.caseSel = decodeURIComponent(parts[1]); return; }
+    S.screen = SCREENS.indexOf(parts[0]) > -1 ? parts[0] : 'overview';
+  }
+  function syncHash() { var w = toHash(); if (location.hash !== w) { try { history.replaceState(null, '', w); } catch (e) {} } }
+  window.addEventListener('hashchange', function () { fromHash(); render(); });
+
+  // ---------------------------------------------------------------- render
+  function render() {
+    if (S.error && !S.tasks.length) {
+      app.innerHTML = '<div style="max-width:900px;margin:0 auto;padding:24px 16px;display:flex;flex-direction:column;gap:14px"><div class="banner"><b>Not connected.</b> ' + esc(S.error) + '</div><div><button class="btn primary" data-demo="1">Use demo data</button> <span class="muted" style="font-size:12px">Mock data shaped like the 23.x API. Nothing is sent anywhere.</span></div>' + diag() + '</div>';
+      return bind();
+    }
+    if (S.loading && !S.tasks.length) { app.innerHTML = '<div style="padding:24px" class="muted">Loading reader tasks…</div>'; return; }
+    var rp = railProjects();
+    if (!rp.length) { app.innerHTML = '<div style="padding:24px">' + '<h1>No reader tasks yet</h1><p class="muted">None of the projects this account can see has a reader task. Create tasks in Task Manager, then refresh.</p>' + diag() + '</div>'; return bind(); }
+    pickDefaults();
+    var sc = scope(), cs = cases(sc), hasWf = sc.adjs.length > 0 || sc.protoAdj;
+    if (S.screen === 'workflow' && !hasWf) S.screen = 'overview';
+    var body = S.screen === 'workflow' ? workflow(sc, cs) : S.screen === 'readers' ? readers(sc) : S.screen === 'cases' ? casesView(sc, cs) : S.screen === 'exports' ? exportsView(sc) : overview(sc, cs);
+    var h = '<div class="shell">' + rail(rp) + '<main class="main">' + header(sc, hasWf, cs) + body + diag() + '</main></div>';
+    if (S.readerSel) h += readerDrawer(sc);
+    if (S.caseSel) h += caseDrawer(sc, cs);
+    if (S.reassign) h += reassignDlg(sc);
+    if (S.exportDlg) h += exportDlg(sc);
+    if (S.toast) h += '<div class="toast" role="status">' + esc(S.toast) + '</div>';
+    app.innerHTML = h; syncHash(); bind();
+  }
+  function rail(rp) {
+    if (S.rail) {
+      return '<nav class="rail min" aria-label="Task administration">' + MARK + '<button class="ib" data-rail="1" aria-label="Expand sidebar" aria-expanded="false" style="width:44px;height:44px">' + IC.expand + '</button><div style="width:28px;border-top:1px solid #182740"></div>' +
+        rp.map(function (p) { var cur = p.id === S.project; return '<button class="mini" data-proj="' + esc(p.id) + '" data-open-rail="1" title="' + esc(p.label) + '" aria-label="' + esc(p.label) + '" aria-current="' + cur + '">' + esc(p.label.replace(/[^A-Za-z0-9]/g, '').slice(0, 4).toUpperCase()) + '</button>'; }).join('') +
+        '<span class="av" style="margin-top:auto" title="' + esc(S.user ? userName(S.user._id) : '') + '">' + esc(S.user ? initials(S.user._id) : '?') + '</span></nav>';
+    }
+    var h = '<nav class="rail" aria-label="Task administration"><div class="brand"><div class="nm">' + '<div style="display:flex;align-items:center;gap:8px">' + MARK + '<b style="font-size:16px">Flywheel</b></div><span>Task admin console</span></div><button class="ib" data-rail="1" aria-label="Collapse sidebar" aria-expanded="true">' + IC.collapse + '</button></div>';
+    h += '<div style="display:flex;flex-direction:column;gap:2px"><div class="rl" style="padding-bottom:6px">Reading projects</div>';
+    rp.forEach(function (p) {
+      h += '<button class="pj hov" data-proj="' + esc(p.id) + '">' + esc(p.label) + '</button>';
+      if (p.id === S.project || rp.length <= 3) p.list.forEach(function (pr) {
+        var cur = p.id === S.project && pr.key === S.protocol;
+        h += '<button class="pr hov" data-proj="' + esc(p.id) + '" data-proto="' + esc(pr.key) + '" aria-current="' + (cur ? 'page' : 'false') + '"><span>' + esc(pr.name) + (pr.ver ? ' <span class="v">v' + esc(pr.ver) + '</span>' : '') + '</span>' + (pr.od ? '<span class="cnt">' + pr.od + '</span>' : '') + '</button>';
+      });
+    });
+    h += '</div>';
+    var noAssign = Object.keys(S.canAssign).filter(function (k) { return S.canAssign[k] === false; }).length, hidden = Object.keys(S.projects).length - rp.length - noAssign;
+    var why = []; if (hidden > 0) why.push(hidden + ' with no reader tasks'); if (noAssign) why.push(noAssign + ' where you can\u2019t assign tasks');
+    if (why.length) h += '<div class="dim" style="font-size:11px;padding:0 8px">' + plural(hidden + noAssign, 'project') + ' hidden: ' + why.join(', ') + '.</div>';
+    if (rp.some(function (p) { return S.canAssign[p.id] == null; }) && !S.demo) h += '<div class="dim" style="font-size:11px;padding:0 8px;color:var(--warn)">Assign permission couldn\u2019t be checked for some projects; their numbers may cover only your own tasks.</div>';
+    h += '<div class="me"><span class="av">' + esc(S.user ? initials(S.user._id) : '?') + '</span><div style="min-width:0;font-size:13px"><div>' + esc(S.user ? (S.users[S.user._id] || {}).name || S.user.email : 'Unknown user') + '</div><div class="dim" style="font-size:11px">' + esc((S.origin || (S.demo ? 'demo data' : '')).replace('https://', '')) + '</div></div></div></nav>';
+    return h;
+  }
+  function header(sc, hasWf, cs) {
+    var p = sc.first, nn = cs.filter(function (c) { return c.stg === 'compare'; }).length;
+    var exportsN = (S.analyses[S.project] || []).filter(function (a) { var s = jobState(a); return s === 'pending' || s === 'running'; }).length;
+    var tabs = [['overview', 'Overview'], hasWf ? ['workflow', 'Workflow', nn] : null, ['readers', 'Readers'], ['cases', 'Cases'], ['exports', 'Exports', exportsN]].filter(Boolean);
+    return '<div class="top"><div class="t"><div class="crumb">' + esc(projLabel(S.project)) + ' · reading project</div><div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:10px"><h1>' + esc(p ? p.protocol_label || 'Unlabelled protocol' : '') + '</h1>' + (p && p.protocol_version ? '<span class="chip">v' + esc(p.protocol_version) + '</span>' : '') + '</div></div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">' + (S.demo ? '<span class="chip demo">Demo data</span>' : '<span class="chip live"><i></i>Live · ' + esc(S.origin.replace('https://', '')) + (S.updated ? ' · ' + S.updated.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '') + '</span>') +
+      '<button class="btn" data-reload="1" aria-label="Refresh">' + IC.refresh + '</button><button class="btn" data-names="1" aria-pressed="' + S.showNames + '">Reader names: ' + (S.showNames ? 'Shown' : 'Coded') + '</button><button class="btn primary" data-export="project">' + IC.doc + 'Export report</button></div></div>' +
+      '<div class="tabs" role="navigation" aria-label="Views">' + tabs.map(function (t) { return '<button class="tab" data-screen="' + t[0] + '" aria-current="' + (S.screen === t[0] ? 'page' : 'false') + '">' + t[1] + (t[2] ? '<span class="badge">' + t[2] + '</span>' : '') + '</button>'; }).join('') + '</div>';
+  }
+  function kpi(l, v, s, col) { return '<div class="kpi"><div class="l">' + esc(l) + '</div><div class="v"' + (col ? ' style="color:' + col + '"' : '') + '>' + esc(v) + '</div><div class="s">' + esc(s) + '</div></div>'; }
+
+  function overview(sc, cs) {
+    var ts = sc.tasks, c = counts(ts), tot = ts.length, done = c.completed;
+    var mins = ts.map(minutesOf).filter(function (x) { return x != null; }), med = median(mins);
+    var since14 = Date.now() - 14 * 864e5, recent = ts.filter(function (t) { var d = doneAt(t); return d && Date.parse(d) >= since14; }).length, rate = recent / 14;
+    var dues = ts.map(function (t) { return t.due_date; }).filter(Boolean).sort(), target = dues.length ? days(dues[dues.length - 1]) : null;
+    var remain = tot - done - c.cancelled, proj = remain <= 0 ? 0 : (recent >= 4 ? Math.ceil(remain / rate) : null);
+    var late = proj != null && target != null ? proj - target : null;
+    var dl = function (d) { var x = today0(); x.setDate(x.getDate() + d); return x.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); };
+    var h = '<div class="kpis">' +
+      kpi('Reads complete', tot ? Math.round(done / tot * 100) + '%' : '—', done + ' of ' + tot + ' tasks') +
+      kpi('Open', String(c.in_progress + c.todo + c.overdue + c.unassigned), c.in_progress + ' in progress · ' + c.unassigned + ' in pool') +
+      kpi('Overdue', String(c.overdue), c.overdue ? 'past task due date' : 'none past due', c.overdue ? 'var(--bad)' : null) +
+      kpi('Median read time', med == null ? '—' : Math.round(med) + ' min', mins.length ? 'from ' + plural(mins.length, 'timed read') : 'needs transitions column') +
+      kpi('Pace, last 14 days', rate ? rate.toFixed(1) + '/day' : '—', plural(recent, 'read') + ' completed') +
+      kpi('Projected finish', proj == null ? '—' : remain <= 0 ? 'Done' : dl(proj), late == null ? (target == null ? 'no due dates set' : 'not enough recent reads') : late > 0 ? late + ' days after last due date' : 'on track for ' + dl(target), late > 0 ? 'var(--warn)' : null) + '</div>';
+    var keys = ['completed', 'in_progress', 'todo', 'overdue', 'unassigned', 'blocked'];
+    h += '<div class="row"><section class="panel" style="flex:1 1 260px"><h2>Status</h2><div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center"><div class="donut" role="img" aria-label="' + keys.map(function (k) { return c[k] + ' ' + LABEL[k]; }).join(', ') + '" style="background:' + donutBg(c, keys) + '"><div><b class="num" style="font-size:28px;font-weight:500">' + tot + '</b><span class="muted" style="font-size:12px">tasks</span></div></div><div style="flex:1 1 120px;display:flex;flex-direction:column;gap:7px">' +
+      keys.filter(function (k) { return c[k] || k !== 'blocked'; }).map(function (k) { return '<div style="display:flex;align-items:center;gap:8px;font-size:13px"><span class="sw" style="background:' + COL[k] + '"></span><span style="flex:1;color:#C9D0DA">' + LABEL[k] + '</span><b class="num">' + c[k] + '</b></div>'; }).join('') + '</div></div></section>';
+    h += burnup(ts, tot, rate, proj, target) + attention(sc, cs) + '</div>';
+    return h;
+  }
+  function burnup(ts, tot, rate, proj, target) {
+    var created = ts.map(function (t) { return t.created; }).filter(Boolean).sort();
+    if (!created.length) return '';
+    var start = Math.min(0, Math.round((day(created[0]) - today0()) / 864e5)), end = Math.max(0, target || 0, proj && proj < 120 ? proj : 0) + 2, span = Math.max(1, end - start);
+    var X = function (d) { return ((d - start) / span * 1000).toFixed(1); }, Y = function (v) { return (200 - (tot ? v / tot : 0) * 190).toFixed(1); };
+    var doneDays = ts.map(doneAt).filter(Boolean).map(function (d) { return Math.round((day(d) - today0()) / 864e5); });
+    var pts = []; for (var d = start; d <= 0; d++) { var n = doneDays.filter(function (x) { return x <= d; }).length; pts.push(X(d) + ' ' + Y(n)); }
+    var cur = doneDays.length, path = 'M ' + pts.join(' L ');
+    var plan = target != null ? 'M ' + X(start) + ' ' + Y(0) + ' L ' + X(target) + ' ' + Y(tot) : '';
+    var pj = proj != null && proj > 0 && proj < 120 ? 'M ' + X(0) + ' ' + Y(cur) + ' L ' + X(proj) + ' ' + Y(tot) : '';
+    var pct = function (d) { return Math.max(0, Math.min(100, (d - start) / span * 100)); };
+    return '<section class="panel" style="flex:3 1 440px"><div class="ph"><h2>Throughput vs plan</h2><div class="legend"><span><i class="sw" style="height:3px;background:var(--accent)"></i>Completed</span><span><i class="sw" style="height:0;border-top:2px dashed #7F8897"></i>Plan to last due date</span><span><i class="sw" style="height:0;border-top:2px dotted #F0B35E"></i>14-day pace</span></div></div>' +
+      '<div style="position:relative;height:200px;border-left:1px solid var(--line2);border-bottom:1px solid var(--line2);margin-left:32px"><span class="num muted" style="position:absolute;left:-32px;top:-6px;font-size:11px">' + tot + '</span><span class="num muted" style="position:absolute;left:-14px;bottom:-6px;font-size:11px">0</span>' +
+      '<div style="position:absolute;top:0;bottom:0;left:' + pct(0) + '%;border-left:1px solid #3A4E70"></div>' +
+      '<svg viewBox="0 0 1000 200" preserveAspectRatio="none" role="img" aria-label="' + cur + ' of ' + tot + ' completed" style="position:absolute;inset:0;width:100%;height:100%;overflow:visible">' +
+      (plan ? '<path d="' + plan + '" fill="none" stroke="#7F8897" stroke-width="2" stroke-dasharray="6 6" vector-effect="non-scaling-stroke"/>' : '') +
+      (pj ? '<path d="' + pj + '" fill="none" stroke="#F0B35E" stroke-width="2" stroke-dasharray="2 5" vector-effect="non-scaling-stroke"/>' : '') +
+      '<path d="' + path + ' L ' + X(0) + ' 200 L ' + X(start) + ' 200 Z" fill="#2269E9" fill-opacity=".12"/><path d="' + path + '" fill="none" stroke="#2269E9" stroke-width="2.5" vector-effect="non-scaling-stroke"/></svg></div>' +
+      '<div style="position:relative;height:30px;margin-left:32px;font-size:11px"><span class="muted" style="position:absolute;left:0">First task<br>' + fmt(created[0]) + '</span><span style="position:absolute;left:' + pct(0) + '%;transform:translateX(-50%);text-align:center"><b>Today</b></span></div>' +
+      '<div style="font-size:13px;color:#C9D0DA;border-top:1px solid #182740;padding-top:10px">' + (proj == null ? 'Not enough completed reads in the last 14 days to project a finish date.' : proj === 0 ? 'All reads complete.' : 'At ' + rate.toFixed(1) + ' reads/day, the remaining reads finish in about ' + plural(proj, 'day') + (target != null ? (proj > target ? ', ' + (proj - target) + ' days after the last due date.' : ', before the last due date.') : '.')) + '</div></section>';
+  }
+  function attention(sc, cs) {
+    var st = readerStats(sc.tasks), items = [];
+    st.filter(function (r) { return r.od; }).sort(function (a, b) { return b.od - a.od; }).slice(0, 3).forEach(function (r) { items.push(['high', 'Overdue', userName(r.id) + ' · ' + plural(r.od, 'overdue read'), r.ip + ' in progress, ' + r.ns + ' not started', 'data-reader="' + esc(r.id) + '"']); });
+    var allMins = [].concat.apply([], st.map(function (r) { return r.mins; })), med = median(allMins), floor = (S.params.pace_floor_minutes) || (med ? Math.max(2, Math.round(med * 0.4)) : null);
+    if (floor) st.filter(function (r) { return r.mins.length >= 3 && r.med < floor; }).forEach(function (r) { items.push(['med', 'Pace', userName(r.id) + ' · median ' + Math.round(r.med) + ' min', 'Protocol median ' + Math.round(med) + ' min; flagged under ' + floor + ' min', 'data-reader="' + esc(r.id) + '"']); });
+    var cmp = cs.filter(function (c) { return c.stg === 'compare'; });
+    if (cmp.length) items.push(['med', 'Adjudication', plural(cmp.length, 'case') + ' with both reads in and adjudication still blocked', 'Check whether the platform comparison ran', 'data-screen="workflow"']);
+    var stall = sc.tasks.filter(function (t) { return t.status === 'in_progress' && t.transitions && t.transitions.in_progress && Date.now() - Date.parse(t.transitions.in_progress) > 3 * 864e5; });
+    if (stall.length) items.push(['low', 'Stalled', plural(stall.length, 'read') + ' in progress 3+ days', stall.slice(0, 3).map(function (t) { return t.task_id; }).join(', '), 'data-screen="readers"']);
+    var pool = sc.tasks.filter(function (t) { return stOf(t) === 'unassigned'; }).length;
+    if (pool) items.push(['low', 'Pool', plural(pool, 'task') + ' unassigned or in a staffing pool', 'Assign from the reader page', 'data-screen="readers"']);
+    var tg = { high: BADGE.overdue, med: BADGE.unassigned, low: BADGE.todo };
+    return '<section class="panel" style="flex:2 1 300px"><div class="ph"><h2>Needs attention</h2><span class="muted" style="font-size:12px">' + items.length + '</span></div>' + (items.length ? items.map(function (i) { return '<button class="attn hov" ' + i[4] + '><span class="pill" style="background:' + tg[i[0]][0] + ';color:' + tg[i[0]][1] + '">' + i[1] + '</span><span style="flex:1;min-width:0"><b style="font-weight:500;display:block">' + esc(i[2]) + '</b><span class="muted" style="font-size:12px">' + esc(i[3]) + '</span></span>' + IC.chev + '</button>'; }).join('') : '<div class="empty">Nothing needs attention.</div>') + '</section>';
+  }
+
+  var SC = { await: '#3F66C4', partial: '#7FA6F7', compare: '#F0B35E', adj: '#B080FC', finalC: '#4CC38A', finalA: '#A7E8C9' };
+  var SL = { await: 'Awaiting reads', partial: 'Some reads in', compare: 'Waiting on comparison', adj: 'Adjudicating', finalC: 'Final · no adjudication', finalA: 'Final · adjudicated' };
+  var SB = { await: ['rgba(76,124,240,.16)', '#A9C1FF'], partial: ['rgba(127,166,247,.2)', '#C9D8FF'], compare: ['rgba(240,179,94,.18)', '#F5C98A'], adj: ['rgba(176,128,252,.18)', '#CDB0FF'], finalC: ['rgba(76,195,138,.16)', '#7DDBAE'], finalA: ['rgba(167,232,201,.14)', '#BFEFD8'] };
+  function workflow(sc, cs) {
+    var G = { all: null, await: ['await'], partial: ['partial'], both: ['compare', 'adj', 'finalC', 'finalA'], compare: ['compare'], adj: ['adj'], final: ['finalC', 'finalA'], finalC: ['finalC'], finalA: ['finalA'] };
+    var of = function (g) { return cs.filter(function (c) { return !G[g] || G[g].indexOf(c.stg) > -1; }); };
+    var dmed = function (xs) { var m = median(xs); return m == null ? '—' : (Math.round(m * 10) / 10) + ' d'; };
+    var card = function (g, label, color, sub, warn) {
+      var xs = of(g), ds = xs.map(function (x) { return x.days; }).filter(function (x) { return x != null; }), mx = ds.length ? Math.max.apply(null, ds) : 0, fin = g.indexOf('final') === 0;
+      var age = !xs.length ? 'None' : fin ? 'Median ' + dmed(xs.map(function (x) { return x.fin && x.rel ? (Date.parse(x.fin) - Date.parse(x.rel)) / 864e5 : null; }).filter(function (x) { return x != null; })) + ' from first read created' : 'Oldest ' + mx + ' d in stage · median ' + dmed(ds);
+      return '<button class="stage hov" data-stage="' + g + '" aria-pressed="' + (S.wfStage === g) + '"><span style="display:flex;align-items:center;gap:8px;width:100%"><span class="sw" style="background:' + color + '"></span><span style="flex:1;font-size:13px;font-weight:500">' + label + '</span><b class="num" style="font-size:22px;font-weight:500">' + xs.length + '</b></span><span class="muted" style="font-size:12px">' + esc(sub) + '</span><span class="num" style="font-size:12px;color:' + (warn != null && mx > warn && xs.length ? 'var(--warn)' : 'var(--mute)') + '">' + age + '</span></button>';
+    };
+    var aw = []; of('await').forEach(function (c) { aw = aw.concat(c.reads); }); var ac = counts(aw);
+    var bothN = of('both').length, adjN = of('finalA').length + of('adj').length + of('compare').length;
+    var thr = S.params.stage_warn_days || {};
+    var cols = [
+      ['1', 'Independent reads', [card('await', 'Awaiting reads', SC.await, ac.unassigned + ' in pool · ' + (ac.todo + ac.overdue) + ' not started · ' + ac.in_progress + ' in progress', thr.await || 14), card('partial', 'Some reads in', SC.partial, 'At least one read submitted', thr.partial || 5)]],
+      ['2', 'Comparison', [card('both', 'All reads in', '#5B6B85', adjN + ' went to adjudication (' + (bothN ? Math.round(adjN / bothN * 100) : 0) + '%)'), card('compare', 'Waiting on comparison', SC.compare, 'Reads in, adjudication task still blocked', thr.compare || 1)]],
+      ['3', 'Adjudication', [card('adj', 'Adjudicating', SC.adj, 'Adjudication task open', thr.adj || 7)]],
+      ['4', 'Final', [card('final', 'Final', SC.finalC, of('final').length + ' of ' + cs.length + ' cases'), card('finalC', 'No adjudication needed', SC.finalC, 'Reads agreed, or no adjudication task'), card('finalA', 'Adjudicated', SC.finalA, 'Adjudication task complete')]]
+    ];
+    var order = ['await', 'partial', 'compare', 'adj', 'finalC', 'finalA'];
+    var h = '<section class="panel"><div class="ph"><h2>Where every case is</h2><span class="num" style="font-size:13px">' + of('final').length + ' of ' + cs.length + ' cases final</span></div><div class="bar" style="height:26px;border-radius:8px">' +
+      order.map(function (k) { var n = of(k).length, p = cs.length ? n / cs.length * 100 : 0; return '<div title="' + SL[k] + ': ' + n + '" style="width:' + p + '%;background:' + SC[k] + ';display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#0A1322">' + (p >= 6 ? n : '') + '</div>'; }).join('') +
+      '</div><div class="legend">' + order.map(function (k) { return '<span><i class="sw" style="background:' + SC[k] + '"></i>' + SL[k] + ' <b class="num">' + of(k).length + '</b></span>'; }).join('') + '</div></section>';
+    h += '<section class="panel"><div class="ph"><h2>Workflow</h2><span class="muted" style="font-size:12px">A case is the container the tasks point at. Select a stage to list its cases.</span></div><div style="overflow-x:auto"><div class="flow">' +
+      cols.map(function (c, i) { return '<div class="col"><div style="display:flex;align-items:center;gap:8px"><span class="av" style="width:22px;height:22px;font-size:11px">' + c[0] + '</span><span class="lab" style="color:#C9D0DA">' + c[1] + '</span></div>' + c[2].join('') + '</div>' + (i < cols.length - 1 ? '<div class="arr">' + IC.arrow + '</div>' : ''); }).join('') + '</div></div></section>';
+    var gaps = cs.filter(function (c) { return c.reads.length >= 2 && c.done === c.reads.length; }).map(function (c) { var d = c.reads.map(doneAt).filter(Boolean).map(Date.parse).sort(); return d.length >= 2 ? (d[d.length - 1] - d[0]) / 864e5 : null; }).filter(function (x) { return x != null; });
+    var tat = cs.filter(function (c) { return c.stg === 'finalA' && c.adj.transitions && c.adj.transitions.completed; }).map(function (c) { var s = c.adj.transitions.todo || c.adj.transitions.in_progress || c.adj.created; return s ? (Date.parse(c.adj.transitions.completed) - Date.parse(s)) / 864e5 : null; }).filter(function (x) { return x != null; });
+    h += '<div class="kpis">' + kpi('Gap between reads', dmed(gaps), 'median, first to last read on a case') + kpi('Adjudication rate', bothN ? Math.round(adjN / bothN * 100) + '%' : '—', adjN + ' of ' + bothN + ' fully read cases') + kpi('Adjudication turnaround', dmed(tat), 'median over ' + plural(tat.length, 'resolved case')) + '</div>';
+    var list = of(S.wfStage).sort(function (a, b) { return order.indexOf(a.stg) - order.indexOf(b.stg) || (b.days || 0) - (a.days || 0); });
+    h += '<section class="tbl"><div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line)"><h2 style="flex:1">' + (S.wfStage === 'all' ? 'All cases' : esc(SL[S.wfStage] || S.wfStage)) + ' · ' + list.length + '</h2>' + (S.wfStage !== 'all' ? '<button class="btn sm" data-stage="all">Show all stages</button>' : '') + '</div>' +
+      '<table><thead><tr><th>Case</th><th>Stage</th><th>Days in stage</th><th>Reads</th><th>Adjudication</th></tr></thead><tbody>' +
+      list.slice(0, 300).map(function (c) { var b = SB[c.stg]; return '<tr><td><button class="lnk" data-case="' + esc(c.key) + '">' + esc(c.label) + '</button></td><td><span class="pill" style="background:' + b[0] + ';color:' + b[1] + '">' + SL[c.stg] + '</span></td><td class="num">' + (c.fin ? '—' : c.days == null ? '—' : c.days + ' d') + '</td><td style="font-size:13px">' + c.reads.map(function (t) { return esc(userName(who(t))) + ' <span class="muted">· ' + LABEL[stOf(t)].toLowerCase() + '</span>'; }).join('<br>') + '</td><td style="font-size:13px">' + (c.adj ? esc(c.adj.task_id) + ' · ' + esc(LABEL[stOf(c.adj)]) + (c.adj.adjudication && c.adj.adjudication.decision ? ' · ' + esc(c.adj.adjudication.decision) : '') : '<span class="muted">—</span>') + '</td></tr>'; }).join('') +
+      '</tbody></table>' + (list.length ? '' : '<div class="empty">No cases in this stage.</div>') + '</section>';
+    return h;
+  }
+
+  function readers(sc) {
+    var st = readerStats(sc.tasks), c = counts(sc.tasks);
+    var sk = S.sortKey, dir = S.sortDir === 'asc' ? 1 : -1;
+    var val = function (r) { return { name: userName(r.id).toLowerCase(), med: r.med == null ? 1e9 : r.med, ns: r.ns, ip: r.ip, done: r.done, od: r.od, last: r.last || '' }[sk]; };
+    st.sort(function (a, b) { var x = val(a), y = val(b); return x < y ? -dir : x > y ? dir : 0; });
+    var all = [].concat.apply([], st.map(function (r) { return r.mins; })), med = median(all);
+    var lo = (S.params.typical_minutes && S.params.typical_minutes[0]) || (med ? Math.round(med * 0.6) : null), hi = (S.params.typical_minutes && S.params.typical_minutes[1]) || (med ? Math.round(med * 1.6) : null);
+    var floor = S.params.pace_floor_minutes || (med ? Math.max(2, Math.round(med * 0.4)) : 0);
+    var smax = Math.max(hi ? hi * 1.4 : 10, all.length ? Math.max.apply(null, all) + 2 : 10), sx = function (v) { return Math.min(100, v / smax * 100); };
+    var mx = Math.max(1, Math.max.apply(null, st.map(function (r) { return r.assigned; }).concat([1])));
+    var h = '<div class="kpis">' + kpi('Readers with tasks', String(st.length), st.filter(function (r) { return r.last && Date.now() - Date.parse(r.last) < 3 * 864e5; }).length + ' active in the last 3 days') + kpi('Complete', String(c.completed), 'of ' + sc.tasks.length + ' tasks') + kpi('Median read time', med == null ? '—' : Math.round(med) + ' min', med == null ? 'needs the transitions column' : 'from in-progress to completed') + kpi('Unassigned or pool', String(c.unassigned), 'not on a reader yet', c.unassigned ? 'var(--warn)' : null) + '</div>';
+    h += '<section class="panel"><div class="ph"><h2>Workload and pace</h2><div class="legend"><span><i class="sw" style="background:var(--c-done)"></i>Complete</span><span><i class="sw" style="background:var(--c-ip)"></i>In progress</span><span><i class="sw" style="background:var(--c-todo)"></i>Not started</span><span><i class="sw" style="background:var(--c-od)"></i>Overdue</span><span><i class="sw" style="border-radius:99px;background:#8FB3FF"></i>Read time</span>' + (floor ? '<span><i class="sw" style="border-radius:99px;background:#F0B35E"></i>Under ' + floor + ' min</span>' : '') + '</div></div><div style="overflow-x:auto"><div style="min-width:760px;display:flex;flex-direction:column;gap:4px">' +
+      '<div style="display:grid;grid-template-columns:200px 1fr 1.25fr;gap:18px" class="lab"><span>Reader</span><span>Assigned</span><span>Minutes per completed read' + (lo ? ' · band = typical ' + lo + '–' + hi : '') + '</span></div>' +
+      st.map(function (r) {
+        return '<div style="display:grid;grid-template-columns:200px 1fr 1.25fr;gap:18px;align-items:center;min-height:38px"><button class="lnk" data-reader="' + esc(r.id) + '" style="display:flex;align-items:center;gap:8px"><span class="av" style="width:26px;height:26px">' + esc(initials(r.id)) + '</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(userName(r.id)) + '</span></button>' +
+          '<div style="display:flex;align-items:center;gap:8px"><div class="bar" style="flex:1;background:transparent">' + ['done', 'ip', 'ns', 'od'].map(function (k, i) { return '<div style="width:' + (r[k] / mx * 100) + '%;background:' + ['var(--c-done)', 'var(--c-ip)', 'var(--c-todo)', 'var(--c-od)'][i] + '"></div>'; }).join('') + '</div><span class="num muted" style="font-size:12px;width:52px;text-align:right">' + r.done + '/' + r.assigned + '</span></div>' +
+          '<div class="strip" role="img" aria-label="' + (r.mins.length ? r.mins.length + ' timed reads, median ' + Math.round(r.med) + ' min' : 'no timed reads') + '">' + (lo ? '<div class="band" style="left:' + sx(lo) + '%;width:' + (sx(hi) - sx(lo)) + '%"></div>' : '') + '<div class="ax"></div>' + r.mins.map(function (m) { return '<i style="left:' + sx(m) + '%;background:' + (m < floor ? '#F0B35E' : '#8FB3FF') + '"></i>'; }).join('') + (r.med != null ? '<b style="left:' + sx(r.med) + '%"></b>' : '') + '</div></div>';
+      }).join('') + '</div></div></section>';
+    var col = function (k, l) { var on = S.sortKey === k; return '<th aria-sort="' + (on ? (S.sortDir === 'asc' ? 'ascending' : 'descending') : 'none') + '"><button class="sorth" data-sort="' + k + '" data-on="' + (on ? 1 : 0) + '">' + l + (on ? (S.sortDir === 'asc' ? ' ↑' : ' ↓') : '') + '</button></th>'; };
+    h += '<section class="tbl"><table><thead><tr>' + col('name', 'Reader') + col('med', 'Median time') + col('ns', 'Not started') + col('ip', 'In progress') + col('done', 'Complete') + col('od', 'Overdue') + col('last', 'Last activity') + '</tr></thead><tbody>' +
+      st.map(function (r) { return '<tr><td><button class="lnk" data-reader="' + esc(r.id) + '">' + esc(userName(r.id)) + '</button></td><td class="num"' + (r.med != null && r.med < floor ? ' style="color:var(--warn)"' : '') + '>' + (r.med == null ? '—' : Math.round(r.med) + ' min') + '</td><td class="num">' + r.ns + '</td><td class="num">' + r.ip + '</td><td class="num">' + r.done + '</td><td class="num"' + (r.od ? ' style="color:var(--bad);font-weight:600"' : '') + '>' + r.od + '</td><td>' + (r.last ? fmtT(r.last) : '—') + '</td></tr>'; }).join('') +
+      '</tbody></table>' + (st.length ? '' : '<div class="empty">No tasks assigned to readers yet.</div>') + '<div class="dim" style="font-size:12px;padding:10px 14px;border-top:1px solid var(--line)">Agreement between readers needs form responses per task; that comes with the next harness step.</div></section>';
+    return h;
+  }
+
+  function casesView(sc, cs) {
+    var F = [['all', 'All'], ['open', 'Incomplete'], ['overdue', 'Overdue'], ['adj', 'Has adjudication']];
+    var m = function (c, f) { return f === 'all' || (f === 'open' ? c.stK !== 'completed' : f === 'overdue' ? c.stK === 'overdue' : !!c.adj); };
+    var list = cs.filter(function (c) { return m(c, S.caseFilter); });
+    var h = '<div class="kpis">' + kpi('Cases', String(cs.length), cs.filter(function (c) { return c.stK === 'completed'; }).length + ' with every read complete') + kpi('Tasks per case', cs.length ? (sc.reads.length / cs.length).toFixed(1) : '—', 'reads, excluding adjudication') + kpi('With adjudication', String(cs.filter(function (c) { return c.adj; }).length), cs.filter(function (c) { return c.adj && c.adj.status === 'completed'; }).length + ' resolved') + '</div>';
+    h += '<section class="tbl"><div class="opt" style="padding:12px 14px;border-bottom:1px solid var(--line)">' + F.map(function (f) { return '<button class="ob" data-cf="' + f[0] + '" aria-pressed="' + (S.caseFilter === f[0]) + '">' + f[1] + ' <span class="muted num">' + cs.filter(function (c) { return m(c, f[0]); }).length + '</span></button>'; }).join('') + '</div>' +
+      '<table><thead><tr><th>Case</th><th>Reads</th><th>Earliest due</th><th>Adjudication</th><th>Status</th></tr></thead><tbody>' +
+      list.slice(0, 400).map(function (c) { return '<tr><td><button class="lnk" data-case="' + esc(c.key) + '">' + esc(c.label) + '</button></td><td class="num">' + c.done + '/' + c.reads.length + '</td><td>' + fmt(c.due) + '</td><td>' + (c.adj ? badge(stOf(c.adj)) : '<span class="muted">—</span>') + '</td><td>' + badge(c.stK, c.stK === 'completed' ? 'Complete' : c.done + '/' + c.reads.length + ' · ' + LABEL[c.stK]) + '</td></tr>'; }).join('') +
+      '</tbody></table>' + (list.length ? '' : '<div class="empty">No cases match.</div>') + (list.length > 400 ? '<div class="dim" style="padding:10px 14px">Showing the first 400.</div>' : '') + '</section>';
+    return h;
+  }
+
+  function exportsView(sc) {
+    var proto = sc.first ? sc.first.protocol_label : '', ex = S.analyses[S.project], g = S.gear;
+    var h = '';
+    if (S.gearState === 'missing') h += '<div class="banner">The <span class="mono">' + esc(gearName()) + '</span> gear isn’t installed on this site, so exports can’t run. A site admin installs it from the Gear Exchange.</div>';
+    else if (g && natural(g.gear.version, '0.2.4') < 0) h += '<div class="banner">Exporter v' + esc(g.gear.version) + ' is installed. v0.2.4 and later also export form responses saved on non-file containers; consider upgrading.</div>';
+    var mineEx = (ex || []).filter(function (a) { var p = exportProtocol(a); return !p || p === proto; });
+    var last = mineEx.filter(function (a) { return jobState(a) === 'complete'; })[0];
+    var since = last ? sc.tasks.filter(function (t) { var d = doneAt(t); return d && Date.parse(d) > Date.parse(last.created); }).length : null;
+    h += '<section class="panel" style="background:#0F1E33;border-color:var(--line2)"><div class="lab">' + esc(proto) + '</div>' + (last ? '<div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px"><div style="flex:1;min-width:220px"><div class="num" style="font-size:30px;font-weight:500;color:' + (since ? 'var(--warn)' : 'var(--ok)') + '">' + since + '</div><div>' + (since ? plural(since, 'task') + ' completed since' : 'Up to date with') + ' the last export (' + fmtT(last.created) + ')</div><div class="muted num" style="font-size:12px">' + sc.tasks.filter(function (t) { return t.status === 'completed'; }).length + ' completed tasks in this protocol now</div></div><button class="btn primary" data-export="project"' + (g ? '' : ' disabled') + '>Export now</button></div>' : '<div style="display:flex;align-items:center;gap:12px"><span style="flex:1">No export of this protocol on this project yet.</span><button class="btn primary" data-export="project"' + (g ? '' : ' disabled') + '>Export now</button></div>') + '</section>';
+    if (ex == null) return h + '<div class="empty">Loading exports…</div>';
+    h += '<section class="panel"><div class="ph"><h2>Exports on this project</h2><span class="muted" style="font-size:12px">Analyses made by the exporter gear, newest first</span></div>' + (ex.length ? ex.map(function (a) {
+      var s = jobState(a), idx = { pending: 0, running: 1, complete: 2, failed: 1, cancelled: -1 }[s];
+      var steps = ['Queued', 'Running', 'Files ready'].map(function (l, i) { var c = s === 'failed' && i === 1 ? 'var(--c-od)' : (idx != null && (i < idx || (i === idx && s === 'complete'))) ? 'var(--c-done)' : i === idx ? 'var(--accent)' : 'var(--line)'; return '<div><i style="background:' + c + '"></i><span class="muted">' + l + '</span></div>'; }).join('');
+      var aSince = s === 'complete' ? sc.tasks.filter(function (t) { var d = doneAt(t); return d && Date.parse(d) > Date.parse(a.created); }).length : null;
+      return '<div style="border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:10px;background:var(--panel2)"><div style="display:flex;gap:10px;align-items:flex-start"><div style="flex:1;min-width:0"><b style="font-weight:600">' + esc(a.label) + '</b><div class="muted" style="font-size:12px">' + fmtT(a.created) + (a.gear_info ? ' · v' + esc(a.gear_info.version) : '') + '</div></div>' + badge(s === 'complete' ? 'completed' : s === 'failed' ? 'overdue' : s === 'running' ? 'in_progress' : 'todo', { complete: 'Ready', failed: 'Failed', running: 'Running', pending: 'Queued', cancelled: 'Cancelled' }[s] || s) + '</div>' +
+        (idx != null && idx >= 0 ? '<div class="steps">' + steps + '</div>' : '') +
+        (aSince != null ? '<div style="font-size:12px;color:' + (aSince ? 'var(--warn)' : 'var(--ok)') + '">' + (aSince ? plural(aSince, 'task') + ' completed since this export' : 'Up to date: no tasks completed since this export') + '</div>' : '') +
+        ((a.files || []).filter(function (f) { return /\.csv$/i.test(f.name); }).map(function (f) { return '<div class="file">' + IC.doc + '<div style="flex:1;min-width:0"><div class="mono" style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(f.name) + '</div><div class="muted num" style="font-size:11px">' + (f.size ? Math.max(1, Math.round(f.size / 1024)) + ' KB' : '') + '</div></div><button class="btn sm primary" data-dl="' + esc((a._id || a.id) + '|' + f.name) + '">Download</button></div>'; }).join('')) + '</div>';
+    }).join('') : '<div class="empty">No exports yet.</div>') + '</section>';
+    return h;
+  }
+
+  function readerDrawer(sc) {
+    var id = S.readerSel, st = readerStats(sc.tasks).filter(function (r) { return r.id === id; })[0];
+    var h = '<button class="scrim" data-close="1" aria-label="Close"></button><aside class="drawer" aria-label="Reader"><div style="display:flex;align-items:flex-start;gap:10px"><div style="flex:1"><div class="crumb">' + esc(projLabel(S.project)) + '</div><h1 style="font-size:24px">' + esc(userName(id)) + '</h1></div><button class="ib" data-close="1" aria-label="Close">' + IC.close + '</button></div>';
+    if (!st) return h + '<p class="muted">No tasks on this protocol.</p></aside>';
+    var keys = ['completed', 'in_progress', 'todo', 'overdue'];
+    h += '<div style="display:flex;gap:16px;align-items:center"><div class="donut" style="width:120px;height:120px;background:' + donutBg(st.c, keys) + '"><div style="inset:18px"><b class="num" style="font-size:22px;font-weight:500">' + st.assigned + '</b></div></div><div style="flex:1">' + keys.map(function (k) { return '<div class="kv"><span><i class="sw" style="background:' + COL[k] + '"></i> ' + LABEL[k] + '</span><b class="num">' + st.c[k] + '</b></div>'; }).join('') + '</div></div>';
+    h += '<div><div class="kv"><span>Median read time</span><b>' + (st.med == null ? '—' : Math.round(st.med) + ' min') + '</b></div><div class="kv"><span>Last activity</span><b>' + (st.last ? fmtT(st.last) : '—') + '</b></div><div class="kv"><span>Email</span><b>' + esc((S.users[id] || {}).email || '—') + '</b></div></div>';
+    var movable = st.tasks.filter(function (t) { return t.status === 'todo'; });
+    h += '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" data-reassign-all="' + esc(id) + '"' + (movable.length ? '' : ' disabled') + '>Reassign ' + plural(movable.length, 'not-started read') + '</button></div>';
+    h += '<div class="tbl"><table style="min-width:0"><thead><tr><th>Task</th><th>Case</th><th>Time</th><th>Due</th><th>Status</th></tr></thead><tbody>' + st.tasks.slice().sort(function (a, b) { return natural(a.task_id, b.task_id); }).map(function (t) {
+      var m = minutesOf(t); return '<tr><td class="mono">' + esc(t.task_id) + '</td><td><button class="lnk" data-case="' + esc(caseKey(t)) + '" style="font-size:13px">' + esc(caseLabel(t)) + '</button></td><td class="num">' + (m ? m + ' min' : '—') + '</td><td class="num">' + fmt(t.due_date) + '</td><td>' + badge(stOf(t)) + '</td></tr>';
+    }).join('') + '</tbody></table></div></aside>';
+    return h;
+  }
+  function viewerUrl(t) { var pid = projOf(t); return pid && S.origin ? S.origin + '/ohif-viewer-v3/project/' + pid + '/reader?taskId=' + encodeURIComponent(t._id || t.id) : null; }
+  function caseDrawer(sc, cs) {
+    var c = cs.filter(function (x) { return x.key === S.caseSel; })[0];
+    var h = '<button class="scrim" data-close="1" aria-label="Close"></button><aside class="drawer" aria-label="Case"><div style="display:flex;align-items:flex-start;gap:10px"><div style="flex:1"><div class="crumb">' + esc(projLabel(S.project)) + '</div><h1 style="font-size:24px">' + esc(c ? c.label : 'Case') + '</h1></div><button class="ib" data-close="1" aria-label="Close">' + IC.close + '</button></div>';
+    if (!c) return h + '<p class="muted">This case isn’t in the selected protocol.</p></aside>';
+    var b = SB[c.stg];
+    h += '<div><span class="pill" style="background:' + b[0] + ';color:' + b[1] + '">' + SL[c.stg] + '</span></div>';
+    var tl = c.reads.concat(c.adj ? [c.adj] : []);
+    h += tl.map(function (t) {
+      var m = minutesOf(t), u = viewerUrl(t);
+      return '<div class="panel" style="padding:14px;gap:8px"><div style="display:flex;gap:8px;align-items:center"><b class="mono" style="flex:1">' + esc(t.task_id) + '</b>' + badge(stOf(t)) + '</div><div class="kv"><span>' + (isAdj(t) ? 'Adjudication' : 'Read ' + esc(t.read_number || '')) + '</span><span>' + esc(userName(who(t))) + '</span></div><div class="kv"><span>Due</span><span>' + fmt(t.due_date) + '</span></div><div class="kv"><span>Read time</span><span>' + (m ? m + ' min' : '—') + '</span></div>' +
+        (t.adjudication && t.adjudication.decision ? '<div class="kv"><span>Decision</span><span>' + esc(t.adjudication.decision) + '</span></div>' : '') +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap">' + (u ? '<button class="btn sm" data-viewer="' + esc(t._id || t.id) + '">Open in viewer</button>' : '') + (t.status === 'todo' || t.status === 'blocked' ? '<button class="btn sm" data-reassign-one="' + esc(t._id || t.id) + '">Reassign</button>' : '') + '</div></div>';
+    }).join('');
+    h += '<p class="dim" style="font-size:12px">Answers by read (and agreement) need form responses per task; they arrive with the next harness step.</p></aside>';
+    return h;
+  }
+  function reassignDlg(sc) {
+    var r = S.reassign, ts = S.tasks.filter(function (t) { return r.ids.indexOf(t._id || t.id) > -1; });
+    var cands = readerStats(sc.all).filter(function (x) { return x.id !== r.from; }).sort(function (a, b) { return a.open - b.open; });
+    if (S.user && !cands.some(function (x) { return x.id === S.user._id; }) && S.user._id !== r.from) cands.push({ id: S.user._id, open: 0, med: null });
+    return '<div class="modal"><div class="dlg" role="dialog" aria-modal="true" aria-label="Reassign"><div style="display:flex;gap:10px;align-items:flex-start"><div style="flex:1"><h1 style="font-size:22px">Reassign ' + plural(ts.length, 'read') + '</h1><p class="muted" style="margin:6px 0 0;font-size:13px">' + esc(ts.map(function (t) { return t.task_id; }).slice(0, 8).join(', ')) + (ts.length > 8 ? '…' : '') + (r.from ? ' from ' + esc(userName(r.from)) : '') + '</p></div><button class="ib" data-cancel="1" aria-label="Close">' + IC.close + '</button></div>' +
+      '<div class="lab">Move to</div><div style="display:flex;flex-direction:column;gap:6px">' + cands.map(function (x) { var on = r.to === x.id; return '<button class="ob" style="height:auto;min-height:46px;border-radius:10px;display:flex;align-items:center;gap:10px;text-align:left;padding:8px 12px" data-to="' + esc(x.id) + '" aria-pressed="' + on + '"><span class="av" style="width:26px;height:26px">' + esc(initials(x.id)) + '</span><span style="flex:1">' + esc(userName(x.id)) + '</span><span class="muted num" style="font-size:12px">' + x.open + ' open in this project</span></button>'; }).join('') + '</div>' +
+      '<p class="muted" style="margin:0;font-size:12px">Only not-started reads move, so nobody loses a draft. This changes the assignee in Flywheel and shows in the task’s history.</p>' +
+      '<div style="display:flex;justify-content:flex-end;gap:8px"><button class="btn" data-cancel="1">Cancel</button><button class="btn primary" data-confirm-reassign="1"' + (r.to && !S.busy ? '' : ' disabled') + '>Move ' + plural(ts.length, 'read') + '</button></div></div></div>';
+  }
+  function exportDlg(sc) {
+    var d = S.exportDlg, g = S.gear;
+    var lv = [['project', 'Project · ' + projLabel(S.project), 'Every task in this protocol']];
+    if (d.dest && d.level === 'session') lv.push(['session', 'Session · ' + d.destLabel, 'Only this case’s tasks']);
+    var cfg = { debug: false, protocol_name: d.protocol, 'annotations-scope': d.ann, 'form-responses-scope': d.forms, read_timeout: 60 };
+    var bad = d.ann === 'none' && d.forms === 'none';
+    return '<div class="modal"><div class="dlg" role="dialog" aria-modal="true" aria-label="Export"><div style="display:flex;gap:10px;align-items:flex-start"><div style="flex:1"><h1 style="font-size:22px">Export form responses and annotations</h1><p class="muted" style="margin:6px 0 0;font-size:13px">Runs <span class="mono">' + esc(gearName()) + '</span>' + (g ? ' v' + esc(g.gear.version) : '') + ' and saves two CSV files to an analysis.</p></div><button class="ib" data-cancel="1" aria-label="Close">' + IC.close + '</button></div>' +
+      '<div class="lab">Run at</div><div class="opt">' + lv.map(function (l) { return '<button class="ob" data-lv="' + l[0] + '" aria-pressed="' + (d.level === l[0]) + '">' + esc(l[1]) + '</button>'; }).join('') + '</div>' +
+      '<div class="lab">Protocol <span class="mono" style="text-transform:none;letter-spacing:0">protocol_name</span></div><div class="mono" style="padding:8px 12px;border:1px solid var(--line2);border-radius:10px;background:var(--panel2)">' + esc(d.protocol) + '</div>' +
+      '<div class="lab">Form responses <span class="mono" style="text-transform:none;letter-spacing:0">form-responses-scope</span></div><div class="opt">' + [['task', 'Task responses'], ['none', 'None']].map(function (o) { return '<button class="ob" data-fr="' + o[0] + '" aria-pressed="' + (d.forms === o[0]) + '">' + o[1] + '</button>'; }).join('') + '</div>' +
+      '<div class="lab">Annotations <span class="mono" style="text-transform:none;letter-spacing:0">annotations-scope</span></div><div class="opt">' + [['task', 'Task'], ['both', 'Task and non-task'], ['non-task', 'Non-task only'], ['none', 'None']].map(function (o) { return '<button class="ob" data-an="' + o[0] + '" aria-pressed="' + (d.ann === o[0]) + '">' + o[1] + '</button>'; }).join('') + '</div>' +
+      '<details><summary>Gear config</summary><pre>' + esc(JSON.stringify(cfg, null, 2)) + '</pre></details>' +
+      (!S.showNames ? '<p style="margin:0;font-size:12px;color:var(--warn)">Reader names are coded here, but the gear writes assignee emails as stored.</p>' : '') +
+      (bad ? '<p style="margin:0;font-size:12px;color:var(--bad)">Pick at least one output; with both set to none the gear fails.</p>' : '') +
+      '<div style="display:flex;justify-content:flex-end;gap:8px"><button class="btn" data-cancel="1">Cancel</button><button class="btn primary" data-run-export="1"' + (bad || !g || S.busy ? ' disabled' : '') + '>Run export</button></div></div></div>';
+  }
+  function diag() {
+    var sample = S.tasks[0] ? JSON.stringify(S.tasks[0], null, 2) : '(none)';
+    return '<details><summary>Diagnostics for the spike: calls made, columns accepted, one raw task</summary><pre>Route: ' + esc(location.hash || '#/overview') + '\nColumns accepted: ' + esc(accepted ? accepted.join(', ') || '(none)' : '(not probed)') + '\n\n' + esc(S.log.join('\n')) + '</pre><pre>' + esc(sample) + '</pre></details>';
+  }
+
+  // ---------------------------------------------------------------- events
+  function bind() {
+    function all(sel, fn) { app.querySelectorAll(sel).forEach(fn); }
+    var sc = S.tasks.length ? scope() : null;
+    all('[data-demo]', function (b) { b.onclick = function () { location.hash = '#/overview?demo=1'; startDemo(); }; });
+    all('[data-rail]', function (b) { b.onclick = function () { S.rail = !S.rail; try { localStorage.setItem('taskAdmin.railCollapsed', S.rail ? '1' : '0'); } catch (e) {} render(); }; });
+    all('[data-proj]', function (b) { b.onclick = function () {
+      var pid = b.getAttribute('data-proj'), pr = b.getAttribute('data-proto');
+      if (pid !== S.project) { S.project = pid; S.protocol = null; S.wfStage = 'all'; }
+      if (pr) S.protocol = pr;
+      if (b.hasAttribute('data-open-rail')) S.rail = false;
+      S.readerSel = null; S.caseSel = null; pickDefaults(); render(); loadExports();
+    }; });
+    all('[data-screen]', function (b) { b.onclick = function () { S.screen = b.getAttribute('data-screen'); S.readerSel = null; S.caseSel = null; render(); window.scrollTo(0, 0); }; });
+    all('[data-reader]', function (b) { b.onclick = function () { S.readerSel = b.getAttribute('data-reader'); S.caseSel = null; render(); }; });
+    all('[data-case]', function (b) { b.onclick = function () { S.caseSel = b.getAttribute('data-case'); S.readerSel = null; render(); }; });
+    all('[data-close]', function (b) { b.onclick = function () { S.readerSel = null; S.caseSel = null; render(); }; });
+    all('[data-stage]', function (b) { b.onclick = function () { var g = b.getAttribute('data-stage'); S.wfStage = S.wfStage === g ? 'all' : g; render(); }; });
+    all('[data-cf]', function (b) { b.onclick = function () { S.caseFilter = b.getAttribute('data-cf'); render(); }; });
+    all('[data-sort]', function (b) { b.onclick = function () { var k = b.getAttribute('data-sort'); if (S.sortKey === k) S.sortDir = S.sortDir === 'asc' ? 'desc' : 'asc'; else { S.sortKey = k; S.sortDir = k === 'name' ? 'asc' : 'desc'; } render(); }; });
+    all('[data-names]', function (b) { b.onclick = function () { S.showNames = !S.showNames; render(); }; });
+    all('[data-reload]', function (b) { b.onclick = function () { load(); loadExports(); }; });
+    all('[data-viewer]', function (b) { b.onclick = function () { var t = S.tasks.filter(function (x) { return (x._id || x.id) === b.getAttribute('data-viewer'); })[0], u = t && viewerUrl(t); note('open viewer ' + u); if (u) window.open(u, '_blank', 'noopener'); else flash('Viewer link needs the Flywheel origin (not available in demo).'); }; });
+    all('[data-reassign-all]', function (b) { b.onclick = function () { var id = b.getAttribute('data-reassign-all'); S.reassign = { from: id, to: null, ids: sc.tasks.filter(function (t) { return who(t) === id && t.status === 'todo'; }).map(function (t) { return t._id || t.id; }) }; render(); }; });
+    all('[data-reassign-one]', function (b) { b.onclick = function () { var t = S.tasks.filter(function (x) { return (x._id || x.id) === b.getAttribute('data-reassign-one'); })[0]; S.reassign = { from: who(t), to: null, ids: [t._id || t.id] }; render(); }; });
+    all('[data-to]', function (b) { b.onclick = function () { S.reassign.to = b.getAttribute('data-to'); render(); }; });
+    all('[data-confirm-reassign]', function (b) { b.onclick = function () { var r = S.reassign; reassign(S.tasks.filter(function (t) { return r.ids.indexOf(t._id || t.id) > -1; }), r.to); }; });
+    all('[data-cancel]', function (b) { b.onclick = function () { S.reassign = null; S.exportDlg = null; render(); }; });
+    all('[data-export]', function (b) { b.onclick = function () { if (!sc || !sc.first) return; S.exportDlg = { level: 'project', protocol: sc.first.protocol_label, forms: 'task', ann: 'task' }; render(); }; });
+    all('[data-lv]', function (b) { b.onclick = function () { S.exportDlg.level = b.getAttribute('data-lv'); render(); }; });
+    all('[data-fr]', function (b) { b.onclick = function () { S.exportDlg.forms = b.getAttribute('data-fr'); render(); }; });
+    all('[data-an]', function (b) { b.onclick = function () { S.exportDlg.ann = b.getAttribute('data-an'); render(); }; });
+    all('[data-run-export]', function (b) { b.onclick = function () { runExport(S.exportDlg); }; });
+    all('[data-dl]', function (b) { b.onclick = function () { var p = b.getAttribute('data-dl').split('|'), a = (S.analyses[S.project] || []).filter(function (x) { return (x._id || x.id) === p[0]; })[0]; if (a) download(a, { name: p.slice(1).join('|') }); }; });
+  }
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { if (S.reassign || S.exportDlg) { S.reassign = null; S.exportDlg = null; } else { S.readerSel = null; S.caseSel = null; } render(); } });
+  var lastRefresh = 0;
+  function refreshSoon(why) { if ((!S.ext && !S.demo) || S.loading || document.hidden || Date.now() - lastRefresh < 15000) return; lastRefresh = Date.now(); note('Refresh (' + why + ')'); load(true); }
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) refreshSoon('back on this tab'); });
+  setInterval(function () { refreshSoon('every 60 s'); }, 60000);
+
+  // ---------------------------------------------------------------- demo data (shaped like the 23.x responses)
+  var DEMO = (function () {
+    var seed = 20261029, rnd = function () { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+    var hex = function (n) { var s = ''; while (s.length < n) s += Math.floor(rnd() * 16).toString(16); return s; };
+    var iso = function (d, h) { var x = new Date(); x.setHours(h == null ? 9 : h, Math.floor(rnd() * 60), 0, 0); x.setDate(x.getDate() + d); return x.toISOString(); };
+    var users = [['Priya', 'Raman', 1], ['Marcus', 'Ellery', 1.15], ['Hana', 'Sato', 0.9], ['Daniel', 'Okafor', 0.35], ['Sofia', 'Lindqvist', 1], ['Owen', 'Brandt', 1.5], ['Mei', 'Chen', 1], ['Grace', 'Whitfield', 1.1]].map(function (u) { return { _id: hex(24), firstname: u[0], lastname: u[1], email: (u[0] + '.' + u[1]).toLowerCase() + '@readers.example.com', speed: u[2] }; });
+    var me = { _id: hex(24), firstname: 'Data', lastname: 'Manager', email: 'data.manager@example.com' };
+    var group = 'reading-ops';
+    var projects = [{ _id: hex(24), label: 'TBI-HEM-01', group: group }, { _id: hex(24), label: 'ONC-RECIST-02', group: group }, { _id: hex(24), label: 'Neuro PET', group: group }, { _id: hex(24), label: 'WRC-Pilot', group: group }];
+    var roles = [{ _id: 'role-admin', label: 'Read-Write + Task Admin', actions: ['tasks_view', 'tasks_assign', 'tasks_manage'] }, { _id: 'role-reader', label: 'Blinded Reader', actions: ['tasks_view'] }];
+    projects.forEach(function (p, i) { p.permissions = [{ _id: me._id, role_ids: [i === 3 ? 'role-reader' : 'role-admin'] }]; });
+    var tasks = [], n = 0;
+    function mk(proj, proto, protoId, ver, caseIdx, readNo, reader, created, due, status, med, adj) {
+      n++;
+      var subj = 'Case ' + (1270 + caseIdx), ses = hex(24);
+      var t = { _id: hex(24), task_id: 'R-' + (1270 + caseIdx) + '-' + readNo, created: created, status: status, priority: ['medium', 'medium', 'high', 'low'][Math.floor(rnd() * 4)], protocol_label: proto, protocol_id: protoId, protocol_version: ver,
+        assignee: reader ? { type: 'user', id: reader._id } : { type: 'staffing_pool', id: 'pool-' + protoId.slice(0, 6) }, parents: { group: group, project: proj._id, subject: hex(24), session: ses }, due_date: due.slice(0, 10), subcategory: adj ? 'adjudication' : 'read',
+        parent_details: { project_label: proj.label, subject_label: subj, session_label: 'V1' }, creator: me._id, parent_ref: { type: 'session', id: 'ses-' + proj._id.slice(0, 4) + '-' + caseIdx, label: 'V1' }, read_number: adj ? null : readNo, transitions: { todo: created }, modified: created };
+      var c0 = Math.round((Date.parse(created) - Date.now()) / 864e5), spanD = Math.max(1, -c0 - 1);
+      if (status === 'in_progress') t.transitions.in_progress = iso(Math.min(0, -Math.floor(rnd() * Math.min(6, spanD))));
+      if (status === 'completed') t.transitions.in_progress = iso(Math.min(-1, c0 + 1 + Math.floor(Math.pow(rnd(), 0.8) * spanD)));
+      if (status === 'completed') { var m = Math.max(2, Math.round(med * (reader && reader.speed ? reader.speed : 1) * (0.7 + rnd() * 0.6))); t.transitions.completed = new Date(Date.parse(t.transitions.in_progress) + m * 6e4).toISOString(); t.modified = t.transitions.completed; }
+      if (adj) t.adjudication = { decision: status === 'completed' ? ['Read 1', 'Read 2', 'Own value'][Math.floor(rnd() * 3)] : null };
+      tasks.push(t); return t;
+    }
+    var tbi = projects[0], onc = projects[1], pidR = hex(24), pidA = hex(24), pidO = hex(24);
+    for (var i = 0; i < 40; i++) {
+      var batch = Math.floor(i / 10), cr = iso(-34 + batch * 7), due = iso(-34 + batch * 7 + 21), prog = i / 40;
+      var a = users[Math.floor(rnd() * 6)], b; do { b = users[Math.floor(rnd() * 6)]; } while (b === a);
+      var st = function () { var u = rnd(); return prog < 0.5 ? (u < 0.94 ? 'completed' : 'in_progress') : prog < 0.7 ? (u < 0.45 ? 'completed' : u < 0.75 ? 'in_progress' : 'todo') : (u < 0.08 ? 'in_progress' : 'todo'); };
+      var s1 = st(), s2 = st(), r2 = prog > 0.88 && rnd() < 0.6 ? null : b;
+      if (!r2) s2 = 'todo';
+      mk(tbi, 'Hemorrhage read · CT head', pidR, '3', i, 1, a, cr, due, s1, 19);
+      mk(tbi, 'Hemorrhage read · CT head', pidR, '3', i, 2, r2, cr, due, s2, 19);
+      var both = s1 === 'completed' && s2 === 'completed', u2 = rnd();
+      var adjSt = !both ? 'blocked' : u2 < 0.62 ? 'cancelled' : u2 < 0.8 ? 'completed' : u2 < 0.9 ? 'todo' : u2 < 0.95 ? 'in_progress' : 'blocked';
+      mk(tbi, 'Hemorrhage read · CT head', pidR, '3', i, 3, users[6 + (i % 2)], cr, iso(-34 + batch * 7 + 28), adjSt, 11, true);
+    }
+    for (var j = 0; j < 20; j++) {
+      var crO = iso(-30 + Math.floor(j / 8) * 8), dueO = iso(-30 + Math.floor(j / 8) * 8 + 24), pg = j / 20;
+      [1, 2].forEach(function (rn) { var u = rnd(), s = pg < 0.4 ? (u < 0.9 ? 'completed' : 'in_progress') : pg < 0.6 ? (u < 0.5 ? 'in_progress' : 'todo') : 'todo'; mk(onc, 'RECIST 1.1 longitudinal read', pidO, '1', j, rn, users[[2, 4, 6, 7, 0][(j + rn) % 5]], crO, dueO, s, 34); });
+    }
+    for (var k = 0; k < 4; k++) mk(projects[3], 'GA area \u00b7 FAF', hex(24), '1', 900 + k, 1, me, iso(-10), iso(5), k < 2 ? 'completed' : 'todo', 9);
+    var analyses = {}; analyses[tbi._id] = [{ _id: hex(24), label: 'Task Admin export · Hemorrhage read · CT head · ' + iso(-12).slice(0, 16).replace('T', ' '), created: iso(-12, 17), gear_info: { name: GEAR_NAME, version: '0.1.5' }, job: { id: hex(24), state: 'complete' }, files: [{ name: 'form-responses-' + iso(-12).slice(0, 10) + '_17-05-12.csv', size: 143000 }, { name: 'annotations-' + iso(-12).slice(0, 10) + '_17-05-12.csv', size: 273000 }] }];
+    var jobs = {};
+    function csv(pid) {
+      var head = 'Task ID,Task Type,Protocol Label,Task Assignee,Task Status,Subject Label,Session Label,Question,Answer\n';
+      return head + tasks.filter(function (t) { return t.parents.project === pid && t.status === 'completed' && !t.adjudication; }).slice(0, 60).map(function (t) { var u = users.filter(function (x) { return x._id === t.assignee.id; })[0]; return [t.task_id, 'Read', t.protocol_label, u ? u.email : '', 'Complete', t.parent_details.subject_label, 'V1', 'Hemorrhage present', rnd() < 0.7 ? 'Yes' : 'No'].join(','); }).join('\n') + '\n';
+    }
+    function ok(v) { return new Promise(function (res) { setTimeout(function () { res(JSON.parse(JSON.stringify(v))); }, 60 + rnd() * 120); }); }
+    function no(status) { return new Promise(function (res, rej) { setTimeout(function () { rej({ status: status, message: 'demo ' + status }); }, 80); }); }
+    function request(method, path, params, body) {
+      var m;
+      if (method === 'GET' && path === '/api/tasks/reader') { var sk = (params && params.skip) || 0, lim = (params && params.limit) || 50; return ok({ count: Math.min(lim, tasks.length - sk), total: tasks.length, results: tasks.slice(sk, sk + lim) }); }
+      if (method === 'GET' && path === '/api/projects') return ok(projects.map(function (p) { return { _id: p._id, label: p.label, group: p.group }; }));
+      if (method === 'GET' && path === '/api/roles') return ok(roles);
+      if (method === 'GET' && (m = /^\/api\/projects\/([^/]+)$/.exec(path))) { var pp = projects.filter(function (p) { return p._id === m[1]; })[0]; return pp ? ok(pp) : no(404); }
+      if (method === 'GET' && path === '/api/users') return ok(users.concat([me]));
+      if (method === 'GET' && path === '/api/gears') return ok([{ _id: 'gear-fae-015', gear: { name: GEAR_NAME, version: '0.1.5', label: 'Form and Annotation Exporter' }, category: 'analysis' }]);
+      if (method === 'GET' && (m = /^\/api\/projects\/([^/]+)\/analyses$/.exec(path))) return ok(analyses[m[1]] || []);
+      if (method === 'PUT' && (m = /^\/api\/tasks\/reader\/([^/]+)\/assign$/.exec(path))) { var t = tasks.filter(function (x) { return x._id === m[1]; })[0]; if (!t) return no(404); t.assignee = body.assignee; return ok({ modified: 1 }); }
+      if (method === 'POST' && (m = /^\/api\/containers\/([^/]+)\/analyses$/.exec(path))) {
+        var pid = projects.some(function (p) { return p._id === m[1]; }) ? m[1] : tbi._id, jid = hex(24), aid = hex(24), stamp = new Date().toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-');
+        var an = { _id: aid, label: body.label, created: new Date().toISOString(), gear_info: { name: GEAR_NAME, version: '0.1.5' }, job: jid, files: [] };
+        jobs[jid] = { state: 'pending', t0: Date.now(), aid: aid, pid: pid, stamp: stamp, config: body.job.config };
+        (analyses[pid] = analyses[pid] || []).unshift(an);
+        return ok({ _id: aid, job: jid });
+      }
+      if (method === 'GET' && (m = /^\/api\/jobs\/([^/]+)$/.exec(path))) {
+        var j = jobs[m[1]]; if (!j) return no(404);
+        var el = Date.now() - j.t0; j.state = el < 2500 ? 'pending' : el < 7000 ? 'running' : 'complete';
+        if (j.state === 'complete' && !j.done) { j.done = true; var an2 = (analyses[j.pid] || []).filter(function (a) { return a._id === j.aid; })[0]; var f = []; if (j.config['form-responses-scope'] !== 'none') f.push({ name: 'form-responses-' + j.stamp + '.csv', size: 146000 }); if (j.config['annotations-scope'] === 'task' || j.config['annotations-scope'] === 'both') f.push({ name: 'annotations-' + j.stamp + '.csv', size: 275000 }); an2.files = f; an2.job = { id: m[1], state: 'complete' }; }
+        return ok({ id: m[1], state: j.state, destination: { type: 'analysis', id: j.aid } });
+      }
+      if (method === 'GET' && (m = /^\/api\/analyses\/([^/]+)\/files\/(.+)$/.exec(path))) { var pj = Object.keys(analyses).filter(function (k) { return analyses[k].some(function (a) { return a._id === m[1]; }); })[0]; return ok(csv(pj)); }
+      return no(404);
+    }
+    return { request: request, me: me };
+  })();
+  function startDemo() {
+    S.demo = true; S.error = null; S.user = DEMO.me; S.origin = ''; S.params = {};
+    note('Demo mode: mock data shaped like the 23.x API. No network calls to Flywheel.');
+    fromHash(); load();
+  }
+  connect();
+})();
+</script>
+</body>
+</html>
