@@ -2734,6 +2734,8 @@ body{margin:0;overflow:hidden;background:var(--page-shaded);color:var(--typograp
 .topbar{background:var(--card-background)!important;border-bottom:1px solid var(--separations-base);padding:0 16px!important;height:50px;flex-shrink:0;gap:12px!important}
 .tb-l{display:flex;align-items:center;gap:8px;min-width:0;flex:1}
 .tb-r{display:flex;align-items:center;gap:8px;flex-shrink:0}
+:root{--fw-host-close:0px}.fw-embedded:not(.fw-own-close){--fw-host-close:48px}
+.topbar{padding-right:calc(16px + var(--fw-host-close))!important}.side-x{display:inline-flex;margin-right:var(--fw-host-close)}
 .crumb-sep{color:var(--typography-light)}
 .tabbar{background:var(--card-background);padding:0 8px;flex-shrink:0;overflow-x:auto}
 .tab-l{display:inline-flex;align-items:center;gap:6px}
@@ -10987,6 +10989,24 @@ __ds_ns.Tree = __ds_scope.Tree;
   function flash(m) { S.toast = m; render(); clearTimeout(flash.t); flash.t = setTimeout(function () { S.toast = ''; render(); }, 3400); }
   function errMsg(e) { return e && (e.status || e.message) || String(e); }
 
+  // ---------------------------------------------------------------- Flywheel dialog chrome
+  // See project note claude/extension-dialog-sizing-note.md.
+  // fullWidth: updateViewport({width:'100vw'}) after connect. Undocumented: the host hands string widths
+  //   straight to MatDialogRef.updateSize(). Never set height (host forces px; default is already the max).
+  // hideHostClose: needs an Extension SDK newer than 0.14.9 (0.14.9 ignores hideCloseButton). When true we
+  //   pass hideCloseButton, render our own close (ext.close()) and drop the gutter kept clear of Flywheel's X.
+  var FW_CHROME = { fullWidth: true, hideHostClose: false };
+  function fwInitOptions(o) { if (FW_CHROME.hideHostClose) o.hideCloseButton = true; return o; }
+  function fwApplyChrome(ext) {
+    var de = document.documentElement;
+    de.classList.add('fw-embedded');
+    if (FW_CHROME.hideHostClose) de.classList.add('fw-own-close');
+    if (FW_CHROME.fullWidth && ext && typeof ext.updateViewport === 'function') {
+      try { ext.updateViewport({ width: '100vw' }); } catch (e) { note('updateViewport failed: ' + errMsg(e)); }
+    }
+  }
+  function fwClose() { if (S.ext && typeof S.ext.close === 'function') S.ext.close(); }
+
   // ---------------------------------------------------------------- connection
   function flywheelOrigin() {
     try { if (location.ancestorOrigins && location.ancestorOrigins.length) return location.ancestorOrigins[0]; } catch (e) {}
@@ -10996,9 +11016,10 @@ __ds_ns.Tree = __ds_scope.Tree;
     if (/demo/.test(location.hash) || /demo=1/.test(location.search)) return startDemo();
     if (!window.Flywheel || !Flywheel.initExtension) { fail('The Flywheel Extension SDK did not load from cdn.flywheel.io.'); return; }
     var timer = setTimeout(function () { if (!S.ext) fail('No connection from Flywheel. Open this page from a project’s Applications menu inside Flywheel, or use demo data.'); }, 8000);
-    Flywheel.initExtension({ scope: 'ReadWrite', validateOrigin: function (o) { return /^https:\/\/[a-z0-9.-]+\.flywheel\.io$/.test(o); } })
+    Flywheel.initExtension(fwInitOptions({ scope: 'ReadWrite', validateOrigin: function (o) { return /^https:\/\/[a-z0-9.-]+\.flywheel\.io$/.test(o); } }))
       .then(function (ext) {
         clearTimeout(timer);
+        fwApplyChrome(ext);
         S.ext = ext; S.user = ext.user || null; S.params = ext.params || {}; S.origin = flywheelOrigin();
         S.opener = ext.container || null;
         if (S.opener && S.opener.container_type === 'project') S.project = S.opener._id;
@@ -11496,6 +11517,7 @@ __ds_ns.Tree = __ds_scope.Tree;
         <${Tooltip} title=${S.showNames ? 'Code reader names' : 'Show reader names'} position="bottom"><${IconButton} icon="visible-eye-hidden" size="small" color="slate" selected=${!S.showNames} aria-label="Code reader names" onClick=${function () { set({ showNames: !S.showNames }); }} /></${Tooltip}>
         <${Tooltip} title=${S.dark ? 'Light mode' : 'Dark mode'} position="bottom"><${IconButton} icon="moon-night-mode" size="small" color="slate" selected=${S.dark} aria-label="Dark mode" onClick=${toggleDark} /></${Tooltip}>
         <${Button} size="small" startIcon="document-file-download" disabled=${!f.protocol_id} onClick=${function () { openExport(p.sc); }}>Export Report</${Button}>
+        ${S.ext && FW_CHROME.hideHostClose ? html`<${Tooltip} title="Close app" position="bottom"><${IconButton} icon="close" size="small" color="slate" aria-label="Close app" onClick=${fwClose} /></${Tooltip}>` : null}
       </div>
     </${GroupLayout}>`;
   }
@@ -11789,7 +11811,7 @@ __ds_ns.Tree = __ds_scope.Tree;
     return html`<${Frag}>
       <div class="overlay" onClick=${closeSide}></div>
       <aside class="side" aria-label=${p.title}>
-        <${PanelLayout} border="left" rounded=${false} header=${html`<${Frag}><div class="side-h"><${Typography} variant="p4" color="light">${projLabel(S.project)}</${Typography}><${Typography} variant="h3" overflow>${p.title}</${Typography}></div><${IconButton} icon="close" size="small" color="slate" aria-label="Close" onClick=${closeSide} /></${Frag}>`}
+        <${PanelLayout} border="left" rounded=${false} header=${html`<${Frag}><div class="side-h"><${Typography} variant="p4" color="light">${projLabel(S.project)}</${Typography}><${Typography} variant="h3" overflow>${p.title}</${Typography}></div><span class="side-x"><${IconButton} icon="close" size="small" color="slate" aria-label="Close panel" onClick=${closeSide} /></span></${Frag}>`}
           footer=${p.footer || null}>${p.children}</${PanelLayout}>
       </aside>
     </${Frag}>`;
